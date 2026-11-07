@@ -159,16 +159,34 @@ class Checker:
                 self.option_first[key] = (filename, lineno)
 
     def _resolve_include(
-        self, source_filename: str, include_spec: str, include_dir: str | None
+        self,
+        source_filename: str,
+        include_spec: str,
+        include_dirs: list[str] | None,
+        local_dir: str | None,
     ) -> None:
-        base = include_dir or os.path.dirname(os.path.abspath(source_filename))
-        include_glob = os.path.join(base, include_spec)
-        matches = sorted(glob.glob(include_glob))
-        if not matches and not glob.has_magic(include_glob):
-            self.error(
-                "include file '%s' does not exist (included from %s)"
-                % (include_glob, source_filename)
-            )
+        bases = include_dirs or [os.path.dirname(os.path.abspath(source_filename))]
+        # In the repository local overrides live under printers/<p>/local/
+        # while every profile includes them as std.config.local/<file>.
+        local_prefix = "std.config.local/"
+        if local_dir and include_spec.replace(os.sep, "/").startswith(local_prefix):
+            candidates = [
+                os.path.join(local_dir, include_spec[len(local_prefix):])
+            ]
+        else:
+            candidates = [os.path.join(base, include_spec) for base in bases]
+        matches: list[str] = []
+        for include_glob in candidates:
+            matches = sorted(glob.glob(include_glob))
+            if matches:
+                break
+        if not matches:
+            include_glob = candidates[0]
+            if not glob.has_magic(include_glob):
+                self.error(
+                    "include file '%s' does not exist (included from %s)"
+                    % (include_glob, source_filename)
+                )
             return
         for filename in matches:
             if os.path.isdir(filename):
@@ -185,10 +203,14 @@ class Checker:
                     % (filename, source_filename, exc)
                 )
                 continue
-            self._parse_config(data, filename, None)
+            self._parse_config(data, filename, None, local_dir)
 
     def _parse_config(
-        self, data: str, filename: str, include_dir: str | None
+        self,
+        data: str,
+        filename: str,
+        include_dirs: list[str] | None,
+        local_dir: str | None,
     ) -> None:
         path = os.path.abspath(filename)
         if path in self.visited:
@@ -211,7 +233,9 @@ class Checker:
                 self._append(buf, filename)
                 buf.clear()
                 include_spec = header[8:].strip()
-                self._resolve_include(filename, include_spec, include_dir)
+                self._resolve_include(
+                    filename, include_spec, include_dirs, local_dir
+                )
             else:
                 buf.append((lineno, line))
         self._scan(buf, filename)
@@ -219,13 +243,18 @@ class Checker:
         self.visited.remove(path)
 
     # -- drivers -------------------------------------------------------
-    def parse_file(self, filename: str, include_dir: str | None = None) -> None:
+    def parse_file(
+        self,
+        filename: str,
+        include_dirs: list[str] | None = None,
+        local_dir: str | None = None,
+    ) -> None:
         try:
             data = self.read_file(filename)
         except OSError as exc:
             self.error("unable to open config file %s: %s" % (filename, exc))
             return
-        self._parse_config(data, filename, include_dir)
+        self._parse_config(data, filename, include_dirs, local_dir)
 
     def check_unused_modules(self, root: str) -> None:
         included = {os.path.abspath(p) for p in self.included}
@@ -268,19 +297,39 @@ class Checker:
         )
 
 
-def discover_roots(config_dir: str) -> list[tuple[str, str | None]]:
-    """Return (printer.cfg path, include_base_override) pairs.
+def discover_roots(
+    config_dir: str,
+) -> list[tuple[str, list[str] | None, str | None]]:
+    """Return (printer.cfg path, include_base dirs, local override dir) tuples.
 
     A deployed tree has printer.cfg at its root and includes resolve
     relative to it, exactly like Klipper. In the repository the profile
     files live under printers/<name>/ but their include paths are written
-    relative to the deploy root; the override reproduces that layout.
+    for the flattened deploy layout, so the profile directory and the
+    repository root are both tried. No include name is ambiguous between
+    the two locations. Local overrides are mapped from std.config.local/
+    onto printers/<name>/local/.
     """
     root_printer = os.path.join(config_dir, "printer.cfg")
     if os.path.isfile(root_printer):
-        return [(root_printer, None)]
-    profiles = sorted(glob.glob(os.path.join(config_dir, "printers", "*", "printer.cfg")))
-    return [(path, config_dir) for path in profiles]
+        return [
+            (
+                root_printer,
+                None,
+                os.path.join(config_dir, "std.config.local"),
+            )
+        ]
+    profiles = sorted(
+        glob.glob(os.path.join(config_dir, "printers", "*", "printer.cfg"))
+    )
+    return [
+        (
+            path,
+            [os.path.dirname(path), config_dir],
+            os.path.join(os.path.dirname(path), "local"),
+        )
+        for path in profiles
+    ]
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -324,8 +373,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     checker = Checker()
-    for filename, include_dir in roots:
-        checker.parse_file(filename, include_dir)
+    for filename, include_dirs, local_dir in roots:
+        checker.parse_file(filename, include_dirs, local_dir)
     checker.check_unused_modules(config_dir)
 
     if dump_mode:

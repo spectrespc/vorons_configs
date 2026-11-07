@@ -1,2 +1,7 @@
 *.zip
 *.bkp
+*.bak
+*.old
+out/
+.backup/
+.kilo/
