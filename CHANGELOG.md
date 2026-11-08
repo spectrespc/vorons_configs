@@ -10,6 +10,89 @@ Every entry is provided in Russian and English.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-08
+
+### Added / Добавлено
+
+- **RU:** Фича `extra_extruder` стала осью парка: `belay` и `btt_sfs` требуют
+  её (их датчики физически на SHT42), иначе `render_profile.py` и
+  `new_machine.sh` завершаются с ERROR. Шаблон `local/uuids.cfg` в мастере
+  содержит `[mcu]` и `[mcu extruder]` всегда, `[mcu ext-extruder]` — только с
+  `extra_extruder`; мастер спрашивает фичи в интерактивном терминале.
+  **EN:** The `extra_extruder` feature became a fleet axis: `belay` and
+  `btt_sfs` require it (their sensors are physically on the SHT42), otherwise
+  `render_profile.py` and `new_machine.sh` exit with an ERROR. The wizard's
+  `local/uuids.cfg` template always has `[mcu]` and `[mcu extruder]`, and
+  `[mcu ext-extruder]` only with `extra_extruder`; the wizard asks for features
+  on an interactive terminal.
+
+- **RU:** `check_config.py` проверяет ссылки на MCU: ERROR для pin-префикса
+  `NAME:`, `mcu:` у `[board_pins]` и `sensor_mcu:` без `[mcu NAME]`; WARNING
+  для объявленного, но нигде не использованного `[mcu NAME]` (осиротевшая
+  плата); неявный `mcu` и `host` исключены.
+  **EN:** `check_config.py` validates MCU references: ERROR for a `NAME:` pin
+  prefix, `mcu:` in `[board_pins]` and `sensor_mcu:` without `[mcu NAME]`;
+  WARNING for a declared but unreferenced `[mcu NAME]` (orphaned board); the
+  implicit `mcu` and `host` are exempt.
+
+- **RU:** `deploy_configs.sh --matrix` прогоняет 20 комбинаций: `full` и `lite`
+  (без `extra_extruder,belay,btt_sfs`) для каждого model × size.
+  **EN:** `deploy_configs.sh --matrix` runs 20 combinations: `full` and `lite`
+  (without `extra_extruder,belay,btt_sfs`) for every model × size.
+
+- **RU:** `build_mcu.sh` получил `--clean`, `--menuconfig`, `-j N`,
+  `--src DIR` (Klipper или Katapult) и `--print-bin`; артефакты складываются в
+  `<src>/out/<config>`.
+  **EN:** `build_mcu.sh` gained `--clean`, `--menuconfig`, `-j N`, `--src DIR`
+  (Klipper or Katapult) and `--print-bin`; artifacts go to `<src>/out/<config>`.
+
+- **RU:** `flash_mcu.sh` переписан на подкоманды `can`, `query`, `serial`,
+  `dfu`, `linux` с preflight Katapult/`python3-serial`, обязательным UUID
+  (`-u` или интерактивный ввод), `--dry-run`, остановкой и восстановлением
+  `klipper` вокруг CAN-прошивки, подтверждением `mass-erase` для DFU и
+  идемпотентным `linux --setup`.
+  **EN:** `flash_mcu.sh` was rewritten with `can`, `query`, `serial`, `dfu` and
+  `linux` subcommands, Katapult/`python3-serial` preflight, a mandatory UUID
+  (`-u` or interactive prompt), `--dry-run`, stopping and restoring `klipper`
+  around CAN flashing, a `mass-erase` confirmation for DFU and an idempotent
+  `linux --setup`.
+
+- **RU:** В репозиторий добавлены снапшоты сборки `config_m8p_v2` (STM32H723,
+  приложение с 0x8020000) и `config_linux` (process MCU).
+  **EN:** Build snapshots `config_m8p_v2` (STM32H723, application at 0x8020000)
+  and `config_linux` (process MCU) were added to the repository.
+
+### Changed / Изменено
+
+- **RU:** `config_m5p_v1` и `config_sht42_katapult.v1` приведены к текущим
+  Kconfig: добавлены производные опции (`WANT_TRIGGER_ANALOG`,
+  `NEED_SOS_FILTER`, оптимизация Katapult), удалена устаревшая
+  `WANT_LOAD_CELL_PROBE`; все конфиги собираются.
+  **EN:** `config_m5p_v1` and `config_sht42_katapult.v1` were refreshed to the
+  current Kconfig: derived options added (`WANT_TRIGGER_ANALOG`,
+  `NEED_SOS_FILTER`, Katapult optimization), the obsolete
+  `WANT_LOAD_CELL_PROBE` removed; every config builds.
+
+- **RU:** README описывает ось `extra_extruder` (с/без SHT42), зависимости
+  фич, MCU-проверки валидатора и раздел «Прошивка контроллеров» с таблицей
+  соответствия и предупреждением о `dfu mass-erase`.
+  **EN:** README documents the `extra_extruder` axis (with/without SHT42),
+  feature dependencies, validator MCU checks and a "Flashing controllers"
+  section with the mapping table and a `dfu mass-erase` warning.
+
+### Fixed / Исправлено
+
+- **RU:** Запись sysctl в `flash_mcu.sh` использует `sudo tee` вместо
+  неработающего `sudo echo "..." > /etc/sysctl.d/...` (редирект выполнялся без
+  root).
+  **EN:** The sysctl write in `flash_mcu.sh` uses `sudo tee` instead of the
+  broken `sudo echo "..." > /etc/sysctl.d/...` (the redirect ran without root).
+
+- **RU:** `build_mcu.sh` передаёт `OUT` с завершающим слэшем: Klipper трактует
+  его как префикс, иначе объекты попадали в `out/<config>src/`.
+  **EN:** `build_mcu.sh` passes `OUT` with a trailing slash: Klipper treats it
+  as a prefix, otherwise objects landed in `out/<config>src/`.
+
 ## [1.2.0] - 2026-11-08
 
 ### Added / Добавлено
