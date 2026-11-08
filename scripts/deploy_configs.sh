@@ -156,17 +156,44 @@ if (( MATRIX )); then
     echo "ERROR: --matrix cannot be combined with --axis." >&2
     exit 2
   fi
+  # The fleet axis has two feature variants: the profile's own feature set
+  # ("full") and a machine without the SHT42 extra extruder ("lite"), where
+  # belay/btt_sfs cannot be enabled because their sensors live on that board.
+  read_features() {
+    "$PYTHON_BIN" - "$1" <<'PY'
+import sys
+value = ""
+with open(sys.argv[1], encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if line.startswith("features="):
+            value = line.split("=", 1)[1].strip()
+print(value)
+PY
+  }
+  lite_features="$("$PYTHON_BIN" -c '
+import sys
+skip = {"extra_extruder", "belay", "btt_sfs"}
+print(",".join(item for item in sys.argv[1].split(",") if item and item not in skip))
+' "$(read_features "$PROFILE_DIR/machine.conf")")"
   matrix_rc=0
-  for model in trident v24; do
-    for size in 150 200 250 300 350; do
-      printf 'matrix: %s-%s ... ' "$model" "$size"
-      if "$SCRIPT_DIR/deploy_configs.sh" -p "$PROFILE" -s "$SRC" \
-          --check --axis "model=$model" --axis "size=$size" >/dev/null; then
-        echo "ok"
-      else
-        echo "FAILED"
-        matrix_rc=1
-      fi
+  for variant in full lite; do
+    feature_axis=()
+    if [[ "$variant" == lite ]]; then
+      feature_axis=(--axis "features=$lite_features")
+    fi
+    for model in trident v24; do
+      for size in 150 200 250 300 350; do
+        printf 'matrix: %s %s-%s ... ' "$variant" "$model" "$size"
+        if "$SCRIPT_DIR/deploy_configs.sh" -p "$PROFILE" -s "$SRC" \
+            --check --axis "model=$model" --axis "size=$size" \
+            ${feature_axis[@]+"${feature_axis[@]}"} >/dev/null; then
+          echo "ok"
+        else
+          echo "FAILED"
+          matrix_rc=1
+        fi
+      done
     done
   done
   exit "$matrix_rc"
@@ -385,7 +412,7 @@ if (( PRUNE )); then
       printf 'would prune: %s\n' "$rel"
     else
       backup_path "$rel"
-      rm -rf -- "$DEST/$rel"
+      rm -rf -- "${DEST:?}/$rel"
       printf 'pruned: %s\n' "$rel"
     fi
     pruned=$((pruned + 1))

@@ -39,6 +39,33 @@ z_base_measured=227
 z_leg_measured=245
 ```
 
+### Фичи и extra-extruder
+
+`features` — единственный переключатель подсистем: рендер добавляет include-файлы
+только для перечисленных фич. Машины парка бывают с платой SHT42
+(`extra_extruder`) и без неё.
+
+- `extra_extruder` подключает `std.configs/extra-extruder.cfg` и требует
+  `[mcu ext-extruder]` в `local/uuids.cfg`; без платы эту секцию добавлять
+  нельзя — Klipper будет ждать несуществующий CAN-узел.
+- `belay` и `btt_sfs` физически подключены к SHT42, поэтому требуют
+  `extra_extruder`. Нарушение — ERROR в `render_profile.py` и
+  `new_machine.sh`, рендер и деплой не выполняются.
+- `local/uuids.cfg`, созданный мастером, содержит `[mcu]` и `[mcu extruder]`
+  всегда, а `[mcu ext-extruder]` — только при `extra_extruder`.
+
+### Проверки валидатора
+
+`check_config.py` эмулирует чтение конфигурации Klipper и дополнительно
+проверяет ссылки на MCU по исходному тексту опций:
+
+- **ERROR** — pin-префикс `NAME:` (`^NAME:PIN`, `NAME:PIN`), `mcu:` у
+  `[board_pins]` или `sensor_mcu:` у `[temperature_sensor]` ссылается на MCU,
+  для которого нет `[mcu NAME]` (виртуальные `*_virtual_endstop` исключены).
+- **WARNING** — `[mcu NAME]` объявлен, но на него нет ни одной ссылки: признак
+  осиротевшей секции от платы, которой на машине нет. Неявный `mcu` и `host`
+  предупреждение не вызывают.
+
 ### Раскладка репозитория
 
 ```text
@@ -112,7 +139,7 @@ git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && g
 # 2. Оффлайн-проверка без записи в живой каталог
 ./scripts/deploy_configs.sh -p voron-t --check
 
-# 3. Матрица всех model × size (гипотетические профили не коммитятся)
+# 3. Матрица 20 комбинаций: 10 model × size × (full | lite без SHT42)
 ./scripts/deploy_configs.sh -p voron-t --matrix
 ./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
 
@@ -139,20 +166,74 @@ git commit -m "Tune voron-t" && git push
 
 Мастер создаёт `machine.conf`, seed-заглушку `printer.cfg`, `anchors.cfg` с TODO,
 `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, рендерит
-`profile.cfg` и валидирует профиль. Дальше нужно заполнить `local/uuids.cfg` и
+`profile.cfg` и валидирует профиль. В интерактивном терминале он спрашивает
+список фич (или принимает `--features`); `belay`/`btt_sfs` без
+`extra_extruder` отклоняются. Дальше нужно заполнить `local/uuids.cfg` и
 измеренные якоря.
 
 ### Скрипты
 
 | Скрипт | Назначение |
 |---|---|
-| `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix`, `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix` (full/lite), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <профиль> [--write]` | рендер `profile.cfg` из `machine.conf` |
 | `scripts/check_config.py` | офлайн-парсер: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
 | `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → профиль + autosave-снимок |
-| `scripts/new_machine.sh` | мастер заведения профиля |
-| `scripts/build_mcu.sh -c <config> [-o out]` | сборка прошивки MCU |
-| `scripts/flash_mcu.sh -u <uuid> -f <bin>` | прошивка CAN-MCU через Katapult |
+| `scripts/new_machine.sh` | мастер заведения профиля (фичи, UUID-шаблон) |
+| `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | сборка `klipper.bin`, `katapult.bin` или `klipper.elf` |
+| `scripts/flash_mcu.sh [can\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
+
+### Прошивка контроллеров
+
+Сборка и прошивка разделены: `build_mcu.sh` собирает бинарник из снапшота
+Kconfig в `std.compil.configs/`, `flash_mcu.sh` доставляет его на плату и сам
+останавливает/восстанавливает Klipper.
+
+Перед первой прошивкой:
+
+```bash
+git clone https://github.com/Arksine/katapult ~/katapult
+sudo apt install python3-serial          # нужен flashtool.py
+```
+
+UUID читается из `local/uuids.cfg` или `flashtool.py -i can0 -q`, но вводится
+при каждом запуске: аргументом `-u <12 hex>` или интерактивным запросом. В
+скриптах UUID не хардкодится. `--dry-run` печатает команды и ничего не меняет.
+
+| Секция Klipper | Конфиг | Метод | Примечание |
+|---|---|---|---|
+| `mcu` (trident) | `config_m5p_v1` | `can` | M5P, Katapult |
+| `mcu` (v24) | `config_m8p_v2` | `can` | M8P, первая прошивка — `dfu` (Katapult) |
+| `extruder` | `config_sht36_v3` | `can` | toolhead |
+| `ext-extruder` | `config_sht42_v1` | `can` | загрузчик `config_sht42_katapult.v1` → `dfu` |
+| `host` | `config_linux` | `linux` | process MCU, `make flash` |
+
+```bash
+# Сборка (артефакты в ~/klipper/out/<config>)
+scripts/build_mcu.sh -c std.compil.configs/config_sht36_v3 --clean -j4 --print-bin
+scripts/build_mcu.sh -c std.compil.configs/config_sht42_katapult.v1 --src ~/katapult
+scripts/build_mcu.sh -c std.compil.configs/config_linux --print-bin   # klipper.elf
+
+# Прошивка
+scripts/flash_mcu.sh query
+scripts/flash_mcu.sh can -u <uuid> -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh serial -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh dfu -f ~/katapult/out/config_sht42_katapult.v1/katapult.bin
+scripts/flash_mcu.sh linux --setup      # разовые системные шаги
+scripts/flash_mcu.sh linux             # make flash
+```
+
+- `can` останавливает `klipper`, если сервис активен, и восстанавливает его
+  прежнее состояние после прошивки; `query` сервис не трогает.
+- `dfu` делает `mass-erase` и стирает загрузчик: только первичная установка
+  Katapult на чистую плату. Скрипт требует ввести `yes`; повторные обновления
+  приложения идут через `can`.
+- `linux --setup` идемпотентно ставит `klipper-mcu.service`, пишет
+  `10-disable-rt-group-limit.conf` через `sudo tee` (редирект `sudo echo >` не
+  работает), применяет sysctl и добавляет пользователя в группу `tty`. Без
+  `--setup` выполняются только сборка и `make flash`.
+- `python3-serial` и `~/katapult` проверяются до прошивки; при отсутствии
+  скрипт печатает команды установки и завершается.
 
 ### Секреты
 
@@ -171,6 +252,8 @@ git commit -m "Tune voron-t" && git push
   замеров на конкретных машинах.
 - Ветка Eddy (`std.configs/sht36-v3.eddy.cfg`) выключена; макросы
   `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` ещё не перенесены с машины-донора.
+- Прошивка проверена офлайн (`--dry-run` и реальные сборки): CAN/serial/DFU
+  требуют `~/katapult` и `python3-serial` и запускаются вручную из консоли.
 
 ## English
 
@@ -211,6 +294,33 @@ frame_d=310
 z_base_measured=227
 z_leg_measured=245
 ```
+
+### Features and the extra extruder
+
+`features` is the only subsystem switch: the renderer emits include files only
+for the listed features. Fleet machines come with the SHT42 board
+(`extra_extruder`) and without it.
+
+- `extra_extruder` includes `std.configs/extra-extruder.cfg` and requires
+  `[mcu ext-extruder]` in `local/uuids.cfg`; do not add that section on a
+  machine without the board, or Klipper will wait for a missing CAN node.
+- `belay` and `btt_sfs` are physically wired to the SHT42, so they require
+  `extra_extruder`. A violation is an ERROR in `render_profile.py` and
+  `new_machine.sh`; rendering and deploy stop.
+- The `local/uuids.cfg` created by the wizard always contains `[mcu]` and
+  `[mcu extruder]`, and `[mcu ext-extruder]` only with `extra_extruder`.
+
+### Validator checks
+
+`check_config.py` emulates Klipper's config reader and additionally verifies MCU
+references against the original option text:
+
+- **ERROR** — a pin prefix `NAME:` (`^NAME:PIN`, `NAME:PIN`), `mcu:` in
+  `[board_pins]` or `sensor_mcu:` in `[temperature_sensor]` that names an MCU
+  without a `[mcu NAME]` section (virtual `*_virtual_endstop` pins are ignored).
+- **WARNING** — `[mcu NAME]` is declared but nothing references it, which
+  signals an orphaned section from a board the machine does not have. The
+  implicit `mcu` and `host` never produce this warning.
 
 ### Repository layout
 
@@ -284,7 +394,7 @@ git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && g
 # 2. Offline check, nothing is written to the live tree
 ./scripts/deploy_configs.sh -p voron-t --check
 
-# 3. Matrix of all model x size combos (hypothetical profiles are not committed)
+# 3. Matrix of 20 combos: 10 model x size x (full | lite without SHT42)
 ./scripts/deploy_configs.sh -p voron-t --matrix
 ./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
 
@@ -311,20 +421,74 @@ git commit -m "Tune voron-t" && git push
 
 The wizard creates `machine.conf`, a seed `printer.cfg`, a TODO `anchors.cfg`,
 `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, renders
-`profile.cfg` and validates the profile. Next, fill `local/uuids.cfg` and the
-measured anchors.
+`profile.cfg` and validates the profile. On an interactive terminal it asks for
+the feature list (or accepts `--features`); `belay`/`btt_sfs` without
+`extra_extruder` are rejected. Next, fill `local/uuids.cfg` and the measured
+anchors.
 
 ### Scripts
 
 | Script | Purpose |
 |---|---|
-| `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix`, `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix` (full/lite), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <profile> [--write]` | render `profile.cfg` from `machine.conf` |
 | `scripts/check_config.py` | offline parser: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
 | `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → profile + autosave snapshot |
-| `scripts/new_machine.sh` | profile creation wizard |
-| `scripts/build_mcu.sh -c <config> [-o out]` | build MCU firmware |
-| `scripts/flash_mcu.sh -u <uuid> -f <bin>` | flash a CAN MCU through Katapult |
+| `scripts/new_machine.sh` | profile creation wizard (features, UUID template) |
+| `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | build `klipper.bin`, `katapult.bin` or `klipper.elf` |
+| `scripts/flash_mcu.sh [can\|query\|serial\|dfu\|linux] ...` | flash one controller |
+
+### Flashing controllers
+
+Building and flashing are separate: `build_mcu.sh` builds a binary from a Kconfig
+snapshot in `std.compil.configs/`, and `flash_mcu.sh` delivers it to the board,
+stopping and restoring Klipper itself.
+
+Before the first flash:
+
+```bash
+git clone https://github.com/Arksine/katapult ~/katapult
+sudo apt install python3-serial          # required by flashtool.py
+```
+
+The UUID comes from `local/uuids.cfg` or `flashtool.py -i can0 -q`, but is
+entered on every run: with `-u <12 hex>` or at the interactive prompt. No script
+hardcodes a UUID. `--dry-run` prints the commands and changes nothing.
+
+| Klipper section | Config | Method | Note |
+|---|---|---|---|
+| `mcu` (trident) | `config_m5p_v1` | `can` | M5P, Katapult |
+| `mcu` (v24) | `config_m8p_v2` | `can` | M8P, first flash via `dfu` (Katapult) |
+| `extruder` | `config_sht36_v3` | `can` | toolhead |
+| `ext-extruder` | `config_sht42_v1` | `can` | bootloader `config_sht42_katapult.v1` → `dfu` |
+| `host` | `config_linux` | `linux` | process MCU, `make flash` |
+
+```bash
+# Build (artifacts in ~/klipper/out/<config>)
+scripts/build_mcu.sh -c std.compil.configs/config_sht36_v3 --clean -j4 --print-bin
+scripts/build_mcu.sh -c std.compil.configs/config_sht42_katapult.v1 --src ~/katapult
+scripts/build_mcu.sh -c std.compil.configs/config_linux --print-bin   # klipper.elf
+
+# Flash
+scripts/flash_mcu.sh query
+scripts/flash_mcu.sh can -u <uuid> -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh serial -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh dfu -f ~/katapult/out/config_sht42_katapult.v1/katapult.bin
+scripts/flash_mcu.sh linux --setup      # one-time host setup
+scripts/flash_mcu.sh linux             # make flash
+```
+
+- `can` stops `klipper` when the service is active and restores its previous
+  state after flashing; `query` leaves the service alone.
+- `dfu` performs a `mass-erase`, which wipes the bootloader: use it only for the
+  first Katapult install on a blank board. The script requires typing `yes`;
+  later application updates go through `can`.
+- `linux --setup` idempotently installs `klipper-mcu.service`, writes
+  `10-disable-rt-group-limit.conf` through `sudo tee` (a `sudo echo >` redirect
+  does not work), applies sysctl and adds the user to the `tty` group. Without
+  `--setup` only the build and `make flash` run.
+- `python3-serial` and `~/katapult` are checked before flashing; when missing,
+  the script prints the install commands and exits.
 
 ### Secrets
 
@@ -345,3 +509,5 @@ measured anchors.
 - The Eddy branch (`std.configs/sht36-v3.eddy.cfg`) is disabled; the
   `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` files have not been copied from the donor
   machine yet.
+- Flashing is validated offline (`--dry-run` plus real builds): CAN/serial/DFU
+  need `~/katapult` and `python3-serial` and are run manually from a console.
