@@ -68,23 +68,46 @@ done < <(find "$LOCAL_SRC" -maxdepth 1 -type f -name '*.cfg' -print0 | sort -z)
 
 if ((${#files[@]} == 0)); then
   echo "No *.cfg files in $LOCAL_SRC; nothing to collect."
-  exit 0
-fi
-
-if (( DRY_RUN )); then
+elif (( DRY_RUN )); then
   for file in "${files[@]}"; do
     printf 'would collect: %s\n' "${file#"$LOCAL_SRC/"}"
   done
   printf 'Dry run: %d file(s) would be copied to %s\n' "${#files[@]}" "$LOCAL_DEST"
-  exit 0
+else
+  mkdir -p -- "$LOCAL_DEST"
+  count=0
+  for file in "${files[@]}"; do
+    name="$(basename -- "$file")"
+    cp -p -- "$file" "$LOCAL_DEST/$name"
+    printf 'collected: %s\n' "$name"
+    count=$((count + 1))
+  done
+  printf 'Copied %d file(s) from %s to %s\n' "$count" "$LOCAL_SRC" "$LOCAL_DEST"
 fi
 
-mkdir -p -- "$LOCAL_DEST"
-count=0
-for file in "${files[@]}"; do
-  name="$(basename -- "$file")"
-  cp -p -- "$file" "$LOCAL_DEST/$name"
-  printf 'collected: %s\n' "$name"
-  count=$((count + 1))
-done
-printf 'Done: %d file(s) copied from %s to %s\n' "$count" "$LOCAL_SRC" "$LOCAL_DEST"
+# SAVE_CONFIG writes its autosave block into the main printer.cfg, never into
+# the includes. Record that block next to the profile so it is not lost, but do
+# not include it: its options must stay in the live printer.cfg, and moving them
+# into local/ would collide with included values.
+SNAPSHOT="$PROFILE_DIR/autosave.snapshot.cfg"
+autosave_tmp="$(mktemp "${TMPDIR:-/tmp}/vorons-autosave.XXXXXX")"
+trap 'rm -f -- "$autosave_tmp"' EXIT
+if [[ -f "$LIVE/printer.cfg" ]] \
+  && awk '/^#\*# <.*SAVE_CONFIG/ {found=1} found {print}' "$LIVE/printer.cfg" > "$autosave_tmp" \
+  && [[ -s "$autosave_tmp" ]]; then
+  if (( DRY_RUN )); then
+    printf 'would snapshot autosave block: %s\n' "${SNAPSHOT#"$SRC/"}"
+  else
+    cp -p -- "$autosave_tmp" "$SNAPSHOT"
+    printf 'snapshotted autosave block: %s\n' "${SNAPSHOT#"$SRC/"}"
+  fi
+  cat >&2 <<EOF
+WARNING: $LIVE/printer.cfg contains a SAVE_CONFIG autosave block.
+         Recorded (record only, NOT included) in ${SNAPSHOT#"$SRC/"}.
+         Those values remain in the live printer.cfg. Moving them into local/
+         is a deliberate manual step: it must not duplicate options that are
+         already defined in an included file.
+EOF
+else
+  printf 'No SAVE_CONFIG autosave block found in %s/printer.cfg\n' "$LIVE"
+fi

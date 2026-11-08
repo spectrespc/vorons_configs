@@ -5,3 +5,7 @@
 out/
 .backup/
 .kilo/
+
+# Python
+__pycache__/
+*.pyc

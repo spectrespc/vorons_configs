@@ -10,6 +10,94 @@ Every entry is provided in Russian and English.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-08
+
+### Added / Добавлено
+
+- **RU:** Оси парка в `printers/<id>/machine.conf`: `size`, `model`, `board`,
+  `xy_step`, `toolhead`, `head`, `features`, рама и измеренные стороны
+  треугольника. Каталоги `std.configs/{boards,mechanics,motors,geometry}/`
+  покрывают комбинации 150–350 мм, Trident/2.4 и M5P/M8P.
+  **EN:** Fleet axes in `printers/<id>/machine.conf`: `size`, `model`, `board`,
+  `xy_step`, `toolhead`, `head`, `features`, frame and measured triangle sides.
+  The `std.configs/{boards,mechanics,motors,geometry}/` catalogs cover the
+  150–350 mm, Trident/2.4 and M5P/M8P combinations.
+
+- **RU:** `scripts/render_profile.py` (детерминированный рендер `profile.cfg`) и
+  `scripts/new_machine.sh` (мастер заведения профиля с оффлайн-валидацией).
+  **EN:** `scripts/render_profile.py` (deterministic `profile.cfg` rendering) and
+  `scripts/new_machine.sh` (profile creation wizard with offline validation).
+
+- **RU:** В деплой добавлены `--render`, `--check`, `--matrix`, `--axis K=V`,
+  `--prune/--no-prune`, сравнение закоммиченного `profile.cfg` со свежим рендером,
+  staging-валидация и отказ при `print_stats.state ∈ {printing, paused}`.
+  **EN:** Deploy gained `--render`, `--check`, `--matrix`, `--axis K=V`,
+  `--prune/--no-prune`, committed-vs-rendered `profile.cfg` staleness check,
+  staging validation and refusal when `print_stats.state ∈ {printing, paused}`.
+
+- **RU:** В валидатор добавлены `--machine`, `--stale-check`, каталогные
+  whitelist'ы, подавление диагностики для слоёв-override и геометрические
+  инварианты: mesh/zero-reference/safe-z/points/probe_points в пределах хода,
+  `z_positions` в раме, сверка сторон треугольника ±2 мм и предупреждение об
+  отсутствии метки `# замер YYYY-MM-DD`.
+  **EN:** The validator gained `--machine`, `--stale-check`, catalog whitelists,
+  override-layer diagnostic suppression and geometry invariants: mesh,
+  zero-reference, safe-z, points and probe_points within travel, `z_positions`
+  inside the frame, triangle-side check with ±2 mm tolerance and a warning when
+  the `# замер YYYY-MM-DD` marker is missing.
+
+- **RU:** `std.configs/boards/manta-m8p.cfg` по эталону
+  `Voron2_M8P-v2.0_config.cfg`, модуль `std.configs/system.cfg`,
+  `std.configs/sensors/y-frame.cfg`, `motors/xy-step-{0.9,1.8}.cfg` и
+  `mechanics/tmc/` для альтернативных драйверов.
+  **EN:** `std.configs/boards/manta-m8p.cfg` based on the
+  `Voron2_M8P-v2.0_config.cfg` reference, `std.configs/system.cfg`,
+  `std.configs/sensors/y-frame.cfg`, `motors/xy-step-{0.9,1.8}.cfg` and
+  `mechanics/tmc/` for alternative drivers.
+
+### Changed / Изменено
+
+- **RU:** `std.configs/gantry/` разобран на мехáнику, моторы и геометрию;
+  `pinout/` переименован в `boards/`; `printer.cfg` стал seed-заглушкой,
+  `profile.cfg` генерируется и коммитится, а `machine.conf`, `anchors.cfg` и
+  `machine-extras.cfg` деплоятся как managed.
+  **EN:** `std.configs/gantry/` split into mechanics, motors and geometry;
+  `pinout/` renamed to `boards/`; `printer.cfg` became a seed stub, `profile.cfg`
+  is generated and committed, and `machine.conf`, `anchors.cfg` and
+  `machine-extras.cfg` are deployed as managed files.
+
+- **RU:** При первом деплое после 1.1.0 старый managed-манифест `printer.cfg`
+  заменяется seed-заглушкой с резервной копией; существующий блок `SAVE_CONFIG`
+  переносится без потери значений. `collect_local.sh` дополнительно сохраняет
+  autosave-блок в `printers/<id>/autosave.snapshot.cfg` (record only).
+  **EN:** On the first deploy after 1.1.0 the old managed `printer.cfg` manifest
+  is replaced by the seed stub with a backup; an existing `SAVE_CONFIG` block is
+  carried over without losing values. `collect_local.sh` additionally records the
+  autosave block in `printers/<id>/autosave.snapshot.cfg` (record only).
+
+- **RU:** Пин пробы и отключение SD-слотов M5P перенесены в модуль платы:
+  `[probe] pin` теперь board-specific, `sd_disable.cfg` подключается из
+  `boards/manta-m5p.cfg`.
+  **EN:** The probe pin and M5P SD-slot disable moved into the board module:
+  `[probe] pin` is now board-specific and `sd_disable.cfg` is included by
+  `boards/manta-m5p.cfg`.
+
+### Fixed / Исправлено
+
+- **RU:** `bed_mesh zero_reference_position` исправлен с `125, 235` на `75, 135`
+  (= `safe_z_home.home_xy_position`): прежняя Y была вне хода 156 мм и вызывала
+  `Move out of range` при `BED_MESH_CALIBRATE`.
+  **EN:** `bed_mesh zero_reference_position` fixed from `125, 235` to `75, 135`
+  (= `safe_z_home.home_xy_position`): the old Y was outside the 156 mm travel and
+  caused `Move out of range` during `BED_MESH_CALIBRATE`.
+
+- **RU:** `z_tilt.z_positions` заменены на измеренный треугольник
+  `(-38.5, 18)`, `(75, 235.1)`, `(188.5, 18)` (база 227 мм, стороны 245 мм)
+  вместо унаследованных 250/219.
+  **EN:** `z_tilt.z_positions` replaced with the measured triangle
+  `(-38.5, 18)`, `(75, 235.1)`, `(188.5, 18)` (227 mm base, 245 mm legs)
+  instead of the inherited 250/219.
+
 ## [1.1.0] - 2026-11-07
 
 ### Added / Добавлено

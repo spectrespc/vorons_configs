@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Deploy one printer profile from this repository into the live config tree.
 #
-# Managed files are copied with overwrite on every deploy. Seed files are
-# copied only when they do not exist in DEST, so service-generated settings
-# (KlipperScreen, telegram bot token, camera and sonar configs) survive.
+# The fleet axes (size/model/board/xy_step) are read once from
+# printers/<profile>/machine.conf. deploy renders profile.cfg from them, checks
+# that the committed copy is fresh, builds a staging tree, validates it with
+# check_config.py and only then writes to DEST.
+#
+# Managed files are overwritten on every deploy. Seed files are created only
+# when missing. printer.cfg is a seed because Klipper's SAVE_CONFIG appends its
+# autosave block there; the block is carried into staging for validation but is
+# never rewritten from the repository.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,21 +18,33 @@ DEST="$HOME/printer_data/config"
 PROFILE=""
 DRY_RUN=0
 BACKUP=0
+CHECK_ONLY=0
+RENDER_ONLY=0
+MATRIX=0
+PRUNE=1
+AXES=()
+PYTHON_BIN="${PYTHON:-python3}"
 
 usage() {
   cat <<'EOF'
 Usage: deploy_configs.sh -p PROFILE [-s SRC] [-d DEST] [-n] [-b]
+                         [--check] [--axis KEY=VALUE]... [--no-prune]
 
-Deploys one printer profile from the repository into the live config tree.
+Renders profile.cfg from printers/<profile>/machine.conf, validates a staging
+tree with check_config.py, then deploys it.
 
 Managed (always overwritten):
-  printers/<profile>/{printer.cfg,macros.cfg,moonraker.conf} -> DEST/
-  printers/<profile>/local/*.cfg                             -> DEST/std.config.local/
-  std.configs/**                                             -> DEST/std.configs/
-  std.macros/**                                              -> DEST/std.macros/
+  profile.cfg, machine.conf, anchors.cfg, machine-extras.cfg,
+  macros.cfg, moonraker.conf                          -> DEST/
+  printers/<profile>/local/*.cfg                      -> DEST/std.config.local/
+  std.configs/**                                      -> DEST/std.configs/
+  std.macros/**                                       -> DEST/std.macros/
 
 Seed (copied only when missing in DEST):
-  KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf
+  printer.cfg, KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf
+
+printer.cfg is a seed because Klipper writes SAVE_CONFIG output into it. It is
+never overwritten by the repository copy.
 
 std.compil.configs/ is never deployed: it holds MCU build configs for
 scripts/build_mcu.sh, not runtime Klipper configuration.
@@ -34,11 +52,18 @@ scripts/build_mcu.sh, not runtime Klipper configuration.
   -p, --printer NAME  profile under printers/ (required)
   -s, --src DIR       repository root (default: parent of this script)
   -d, --dest DIR      destination (default: ~/printer_data/config)
-  -n, --dry-run       list what would be copied, change nothing
-  -b, --backup        back up overwritten managed files under DEST/.backup/<timestamp>/
+  -n, --dry-run       validate and list actions, change nothing
+  -b, --backup        back up overwritten and pruned files under DEST/.backup/<ts>/
+  -c, --check         render + stage + validate only; no writes, no prune
+      --axis K=V      temporary axis override (matrix checks; implies --check)
+      --render        regenerate printers/<profile>/profile.cfg from machine.conf
+      --matrix        validate all model x size combinations and exit
+      --no-prune      keep legacy files that are otherwise pruned
   -h, --help          show this help
 
-When -p is omitted the available profiles are listed.
+Pruned by default (whitelist only):
+  std.configs/gantry/, std.configs/pinout/, std.configs/tc.ext/,
+  DEST/printers/ (leftover from the first 1.1.0 layout), *.old and *.bkp files.
 EOF
 }
 
@@ -53,6 +78,12 @@ while (($#)); do
     -d|--dest)    DEST="${2:?missing value for $1}"; shift 2 ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
     -b|--backup)  BACKUP=1; shift ;;
+    -c|--check)   CHECK_ONLY=1; shift ;;
+    --axis)       AXES+=("${2:?missing value for $1}"); CHECK_ONLY=1; shift 2 ;;
+    --render)     RENDER_ONLY=1; shift ;;
+    --matrix)     MATRIX=1; shift ;;
+    --prune)      PRUNE=1; shift ;;
+    --no-prune)   PRUNE=0; shift ;;
     -h|--help)    usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -74,9 +105,10 @@ if [[ ! -d "$PROFILE_DIR" ]]; then
   exit 1
 fi
 
-for required in printer.cfg macros.cfg moonraker.conf; do
+for required in machine.conf printer.cfg profile.cfg anchors.cfg machine-extras.cfg macros.cfg moonraker.conf; do
   [[ -f "$PROFILE_DIR/$required" ]] || {
     echo "Profile '$PROFILE' is missing required file: $required" >&2
+    echo "Create it with scripts/new_machine.sh or restore it from git." >&2
     exit 1
   }
 done
@@ -105,51 +137,139 @@ check_overlap() {
 }
 check_overlap
 
-# Collect the complete file list first so a source read error aborts before
-# anything is written.
-src_files=()
-dest_rels=()
-modes=()
-add_file() {
-  src_files+=("$1")
-  dest_rels+=("$2")
-  modes+=("$3")
+render() {
+  "$PYTHON_BIN" "$SCRIPT_DIR/render_profile.py" --machine-dir "$PROFILE_DIR" "$@"
 }
 
-for managed in printer.cfg macros.cfg moonraker.conf; do
-  add_file "$PROFILE_DIR/$managed" "$managed" managed
+if (( RENDER_ONLY )); then
+  if ((${#AXES[@]})); then
+    echo "ERROR: --render cannot be combined with --axis." >&2
+    exit 2
+  fi
+  render --write
+  echo "Rendered $PROFILE_DIR/profile.cfg"
+  exit 0
+fi
+
+if (( MATRIX )); then
+  if ((${#AXES[@]})); then
+    echo "ERROR: --matrix cannot be combined with --axis." >&2
+    exit 2
+  fi
+  matrix_rc=0
+  for model in trident v24; do
+    for size in 150 200 250 300 350; do
+      printf 'matrix: %s-%s ... ' "$model" "$size"
+      if "$SCRIPT_DIR/deploy_configs.sh" -p "$PROFILE" -s "$SRC" \
+          --check --axis "model=$model" --axis "size=$size" >/dev/null; then
+        echo "ok"
+      else
+        echo "FAILED"
+        matrix_rc=1
+      fi
+    done
+  done
+  exit "$matrix_rc"
+fi
+
+axis_args=()
+for axis in "${AXES[@]}"; do
+  axis_args+=(--axis "$axis")
 done
+
+# --- 1. committed profile.cfg must match machine.conf -------------------------
+if ((${#AXES[@]} == 0)); then
+  rendered="$(mktemp "${TMPDIR:-/tmp}/vorons-profile.XXXXXX")"
+  render --output "$rendered"
+  if ! cmp -s -- "$rendered" "$PROFILE_DIR/profile.cfg"; then
+    rm -f -- "$rendered"
+    echo "ERROR: profile.cfg is stale for profile '$PROFILE'." >&2
+    echo "Run: scripts/deploy_configs.sh -p $PROFILE --render" >&2
+    echo "Then commit the regenerated file." >&2
+    exit 1
+  fi
+  rm -f -- "$rendered"
+fi
+
+# --- 2. staging tree ----------------------------------------------------------
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vorons-deploy.XXXXXX")"
+cleanup() { rm -rf -- "$STAGE"; }
+trap cleanup EXIT
+
+mkdir -p -- "$STAGE/std.config.local"
+render --output "$STAGE/profile.cfg" "${axis_args[@]}"
+render --dump-conf "$STAGE/machine.conf" "${axis_args[@]}"
+
+cp -p -- "$PROFILE_DIR/printer.cfg" "$STAGE/printer.cfg"
+extract_autosave() {
+  local source="$1" target="$2"
+  [[ -f "$source" ]] || return 1
+  awk '/^#\*# <.*SAVE_CONFIG/ {found=1} found {print}' "$source" > "$target"
+  [[ -s "$target" ]]
+}
+if ((${#AXES[@]} == 0)) && extract_autosave "$DEST/printer.cfg" "$STAGE/.autosave"; then
+  printf '\n' >> "$STAGE/printer.cfg"
+  cat "$STAGE/.autosave" >> "$STAGE/printer.cfg"
+  rm -f -- "$STAGE/.autosave"
+fi
+
+if ((${#AXES[@]} > 0)); then
+  # A hypothetical machine has no measured anchors yet.
+  cat > "$STAGE/anchors.cfg" <<'EOF'
+# Matrix check: measured anchors are not defined for this hypothetical machine.
+# The geometry/<model>-<size>.cfg defaults are used as-is.
+EOF
+else
+  cp -p -- "$PROFILE_DIR/anchors.cfg" "$STAGE/anchors.cfg"
+fi
+cp -p -- "$PROFILE_DIR/machine-extras.cfg" "$STAGE/machine-extras.cfg"
+cp -p -- "$PROFILE_DIR/macros.cfg" "$STAGE/macros.cfg"
+cp -p -- "$PROFILE_DIR/moonraker.conf" "$STAGE/moonraker.conf"
 
 if [[ -d "$PROFILE_DIR/local" ]]; then
   while IFS= read -r -d '' file; do
-    rel="${file#"$PROFILE_DIR/local/"}"
-    add_file "$file" "std.config.local/$rel" managed
-  done < <(find "$PROFILE_DIR/local" -type f -name '*.cfg' -print0 | sort -z)
+    cp -p -- "$file" "$STAGE/std.config.local/$(basename -- "$file")"
+  done < <(find "$PROFILE_DIR/local" -maxdepth 1 -type f -name '*.cfg' -print0 | sort -z)
 fi
 
-for top in std.configs std.macros; do
-  while IFS= read -r -d '' file; do
-    rel="${file#"$SRC/$top/"}"
-    add_file "$file" "$top/$rel" managed
-  done < <(find "$SRC/$top" -type f -print0 | sort -z)
-done
+cp -R -- "$SRC/std.configs/." "$STAGE/std.configs/"
+cp -R -- "$SRC/std.macros/." "$STAGE/std.macros/"
 
-for seed in KlipperScreen.conf crowsnest.conf sonar.conf telegram.conf; do
-  if [[ -f "$PROFILE_DIR/$seed" ]]; then
-    add_file "$PROFILE_DIR/$seed" "$seed" seed
-  fi
-done
+# --- 3. validate staging ------------------------------------------------------
+if ! "$PYTHON_BIN" "$SCRIPT_DIR/check_config.py" --config-dir "$STAGE"; then
+  echo "ERROR: staging validation failed for profile '$PROFILE'; nothing was written." >&2
+  exit 1
+fi
 
-for file in "${src_files[@]}"; do
-  [[ -r "$file" ]] || { echo "Cannot read source file: $file" >&2; exit 1; }
-done
+if (( CHECK_ONLY )); then
+  echo "Check passed: profile '$PROFILE' renders and validates (staging: $STAGE)."
+  exit 0
+fi
 
+# --- 4. refuse to deploy while printing --------------------------------------
+if (( ! DRY_RUN )) && command -v curl >/dev/null 2>&1; then
+  state="$(curl -s --max-time 2 \
+    'http://127.0.0.1:7125/printer/objects/query?print_stats' 2>/dev/null \
+    | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([a-z_]*\)".*/\1/p' \
+    | head -n 1 || true)"
+  case "$state" in
+    printing|paused)
+      echo "ERROR: Moonraker reports print_stats.state=$state; refusing to deploy." >&2
+      echo "Stop or finish the print, or use --check for an offline validation." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# --- 5. write -----------------------------------------------------------------
 if (( DRY_RUN )); then
   [[ -d "$DEST" ]] || echo "Destination does not exist yet (would be created): $DEST"
 else
   mkdir -p -- "$DEST"
 fi
-[[ -d "$DEST" ]] && DEST="$(cd -- "$DEST" && pwd)"
+if [[ -d "$DEST" ]]; then
+  DEST="$(cd -- "$DEST" && pwd)"
+fi
 check_overlap
 
 backup_dir=""
@@ -158,59 +278,145 @@ if (( BACKUP && ! DRY_RUN )); then
   [[ -e "$backup_dir" ]] && backup_dir="$backup_dir-$$"
 fi
 
+backup_path() {
+  local rel="$1"
+  [[ -n "$backup_dir" && -e "$DEST/$rel" ]] || return 0
+  mkdir -p -- "$backup_dir/$(dirname -- "$rel")"
+  cp -a -- "$DEST/$rel" "$backup_dir/$rel"
+  backed_up=$((backed_up + 1))
+}
+
 copied=0
 seeded=0
 seed_skipped=0
+migrated=0
 backed_up=0
+pruned=0
 
-for i in "${!src_files[@]}"; do
-  src="${src_files[$i]}"
-  rel="${dest_rels[$i]}"
-  mode="${modes[$i]}"
-
-  if [[ "$mode" == "seed" && -e "$DEST/$rel" ]]; then
-    seed_skipped=$((seed_skipped + 1))
-    (( DRY_RUN )) && printf 'would skip seed (exists): %s\n' "$rel"
-    continue
-  fi
-
-  if (( DRY_RUN )); then
-    if [[ "$mode" == "seed" ]]; then
-      seeded=$((seeded + 1))
-      printf 'would seed: %s\n' "$rel"
-    else
-      copied=$((copied + 1))
-      printf 'would copy: %s\n' "$rel"
-    fi
-    continue
-  fi
-
-  if [[ -n "$backup_dir" && -e "$DEST/$rel" ]]; then
-    mkdir -p -- "$backup_dir/$(dirname -- "$rel")"
-    cp -p -- "$DEST/$rel" "$backup_dir/$rel"
-    backed_up=$((backed_up + 1))
-    printf 'backed up: %s\n' "$rel"
-  fi
-
-  mkdir -p -- "$DEST/$(dirname -- "$rel")"
-  cp -p -- "$src" "$DEST/$rel"
-  if [[ "$mode" == "seed" ]]; then
-    seeded=$((seeded + 1))
-    printf 'seeded: %s\n' "$rel"
-  else
-    copied=$((copied + 1))
-    printf 'copied: %s\n' "$rel"
-  fi
-done
+managed_files=(profile.cfg machine.conf anchors.cfg machine-extras.cfg macros.cfg moonraker.conf)
+managed_dirs=(std.configs std.macros std.config.local)
 
 if (( DRY_RUN )); then
-  printf 'Dry run for profile %s: %d managed file(s) would be copied, %d seed file(s) would be created, %d seed file(s) already exist.\n' \
-    "$PROFILE" "$copied" "$seeded" "$seed_skipped"
+  for rel in "${managed_files[@]}"; do
+    printf 'would copy: %s\n' "$rel"
+    copied=$((copied + 1))
+  done
+  for dir in "${managed_dirs[@]}"; do
+    printf 'would copy: %s/\n' "$dir"
+    copied=$((copied + 1))
+  done
 else
-  printf 'Done: profile %s, %d managed file(s) copied, %d seed file(s) created, %d seed file(s) left untouched in %s' \
-    "$PROFILE" "$copied" "$seeded" "$seed_skipped" "$DEST"
+  for rel in "${managed_files[@]}"; do
+    backup_path "$rel"
+    mkdir -p -- "$DEST/$(dirname -- "$rel")"
+    cp -p -- "$STAGE/$rel" "$DEST/$rel"
+    printf 'copied: %s\n' "$rel"
+    copied=$((copied + 1))
+  done
+  for dir in "${managed_dirs[@]}"; do
+    backup_path "$dir"
+    mkdir -p -- "$DEST/$dir"
+    cp -R -- "$STAGE/$dir/." "$DEST/$dir/"
+    printf 'copied: %s/\n' "$dir"
+    copied=$((copied + 1))
+  done
+fi
+
+is_seed_manifest() {
+  grep -q '^\[include[[:space:]]\+profile\.cfg\]' "$1" 2>/dev/null
+}
+
+if [[ ! -e "$DEST/printer.cfg" ]]; then
+  if (( DRY_RUN )); then
+    printf 'would seed: printer.cfg\n'
+  else
+    cp -p -- "$PROFILE_DIR/printer.cfg" "$DEST/printer.cfg"
+    printf 'seeded: printer.cfg\n'
+  fi
+  seeded=$((seeded + 1))
+elif ! is_seed_manifest "$DEST/printer.cfg"; then
+  # One-time migration from the 1.1.0 manifest (printer.cfg used to be managed).
+  # The old file is backed up when -b is used; an existing SAVE_CONFIG block is
+  # carried into the new seed so calibrated values are not lost.
+  if (( DRY_RUN )); then
+    printf 'would migrate: printer.cfg (old manifest -> seed)\n'
+  else
+    backup_path printer.cfg
+    new_printer="$DEST/.printer.cfg.new.$$"
+    autosave="$DEST/.printer.cfg.autosave.$$"
+    cp -p -- "$PROFILE_DIR/printer.cfg" "$new_printer"
+    if extract_autosave "$DEST/printer.cfg" "$autosave"; then
+      printf '\n' >> "$new_printer"
+      cat "$autosave" >> "$new_printer"
+      rm -f -- "$autosave"
+      printf 'migrated: printer.cfg to seed (SAVE_CONFIG block preserved)\n'
+    else
+      printf 'migrated: printer.cfg to seed (old manifest kept in backup)\n'
+    fi
+    mv -f -- "$new_printer" "$DEST/printer.cfg"
+  fi
+  migrated=$((migrated + 1))
+else
+  seed_skipped=$((seed_skipped + 1))
+  printf 'kept seed (exists): printer.cfg\n'
+fi
+
+for seed in KlipperScreen.conf crowsnest.conf sonar.conf telegram.conf; do
+  [[ -f "$PROFILE_DIR/$seed" ]] || continue
+  if [[ -e "$DEST/$seed" ]]; then
+    seed_skipped=$((seed_skipped + 1))
+    printf 'kept seed (exists): %s\n' "$seed"
+    continue
+  fi
+  if (( DRY_RUN )); then
+    printf 'would seed: %s\n' "$seed"
+  else
+    cp -p -- "$PROFILE_DIR/$seed" "$DEST/$seed"
+    printf 'seeded: %s\n' "$seed"
+  fi
+  seeded=$((seeded + 1))
+done
+
+# --- 6. prune legacy paths ----------------------------------------------------
+if (( PRUNE )); then
+  for rel in std.configs/gantry std.configs/pinout std.configs/tc.ext printers; do
+    [[ -e "$DEST/$rel" ]] || continue
+    if (( DRY_RUN )); then
+      printf 'would prune: %s\n' "$rel"
+    else
+      backup_path "$rel"
+      rm -rf -- "$DEST/$rel"
+      printf 'pruned: %s\n' "$rel"
+    fi
+    pruned=$((pruned + 1))
+  done
+  if [[ -d "$DEST" ]]; then
+    while IFS= read -r -d '' stale; do
+      rel="${stale#"$DEST/"}"
+      if (( DRY_RUN )); then
+        printf 'would prune: %s\n' "$rel"
+      else
+        backup_path "$rel"
+        rm -f -- "$stale"
+        printf 'pruned: %s\n' "$rel"
+      fi
+      pruned=$((pruned + 1))
+    done < <(find "$DEST" -path "$DEST/.backup" -prune -o -type f \( -name '*.old' -o -name '*.bkp' \) -print0)
+  fi
+fi
+
+# --- 7. summary ---------------------------------------------------------------
+if (( DRY_RUN )); then
+  printf 'Dry run for profile %s: %d managed item(s) would be copied, %d seed file(s) would be created, %d printer.cfg migration(s), %d seed file(s) already exist, %d legacy item(s) would be pruned.\n' \
+    "$PROFILE" "$copied" "$seeded" "$migrated" "$seed_skipped" "$pruned"
+else
+  printf 'Done: profile %s, %d managed item(s) copied, %d seed file(s) created, %d printer.cfg migration(s), %d seed file(s) left untouched in %s' \
+    "$PROFILE" "$copied" "$seeded" "$migrated" "$seed_skipped" "$DEST"
+  if (( pruned > 0 )); then
+    printf ', %d legacy item(s) pruned' "$pruned"
+  fi
   if (( backed_up > 0 )); then
-    printf ' (backed up %d file(s) to %s)' "$backed_up" "$backup_dir"
+    printf ' (backed up %d item(s) to %s)' "$backed_up" "$backup_dir"
   fi
   printf '.\n'
 fi

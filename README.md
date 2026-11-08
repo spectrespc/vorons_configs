@@ -5,99 +5,170 @@
 
 ## Русский
 
+### Оси парка
+
+Профиль машины задаётся один раз в `printers/<id>/machine.conf`. Деплой читает его,
+рендерит `profile.cfg` и валидирует результат; интерактивного выбора при каждом
+деплое нет.
+
+| Ключ | Значения | Назначение |
+|---|---|---|
+| `size` | `150`, `200`, `250`, `300`, `350` | размер стола, мм |
+| `model` | `trident`, `v24` | 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
+| `board` | `manta-m5p`, `manta-m8p` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
+| `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y |
+| `toolhead` | модуль из `std.configs/boards/` | плата инструментальной головы |
+| `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
+| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | подключаемые подсистемы |
+| `frame_w`, `frame_d` | мм | внешняя рама, для проверки якорей |
+| `z_base_measured`, `z_leg_measured` | мм | измеренные стороны треугольника стола |
+
+Пример `machine.conf`:
+
+```ini
+size=150
+model=trident
+board=manta-m5p
+xy_step=0.9
+toolhead=sht36-v3
+head=HGX.8T
+features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
+frame_w=310
+frame_d=310
+z_base_measured=227
+z_leg_measured=245
+```
+
 ### Раскладка репозитория
 
 ```text
 vorons_configs/
 ├── printers/
-│   └── voron-t/                  # профиль принтера
-│       ├── printer.cfg           # манифест include, [printer] и базовые секции
-│       ├── macros.cfg            # макросы конкретного принтера
-│       ├── moonraker.conf        # Moonraker профиля
-│       ├── KlipperScreen.conf    # seed
-│       ├── crowsnest.conf        # seed
-│       ├── sonar.conf            # seed
-│       ├── telegram.conf         # seed
-│       └── local/                # SAVE_CONFIG/тюнинг → std.config.local/
-├── std.configs/                  # общие модули Klipper
-│   ├── display/mini12864.cfg
-│   ├── extruder/main.cfg
-│   ├── extruder/heads/{HGX,BMG}.8T.cfg
-│   ├── extruder/accel/lis2dw.cfg
-│   └── sd_disable.cfg
-├── std.macros/                   # общие макросы
-├── std.compil.configs/           # конфиги сборки MCU (НЕ деплоятся)
-├── scripts/                      # deploy/collect/check/build/flash
-├── README.md  CHANGELOG.md  .gitignore
+│   └── voron-t/
+│       ├── machine.conf        # оси и фичи машины (единственный источник выбора)
+│       ├── profile.cfg         # ГЕНЕРИРУЕТСЯ из machine.conf, коммитится
+│       ├── printer.cfg         # seed: [include profile.cfg] + std.config.local/*
+│       ├── anchors.cfg         # managed: измеренные якоря и фактические лимиты
+│       ├── machine-extras.cfg  # managed: машинные override (idle_timeout и т.п.)
+│       ├── macros.cfg          # managed: макросы профиля
+│       ├── moonraker.conf      # managed
+│       ├── local/              # UUID, PID, input shaper, extruder → std.config.local/
+│       └── KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf  # seed
+├── std.configs/
+│   ├── boards/                 # pinout плат: manta-m5p, manta-m8p, toolhead-платы
+│   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (драйверы)
+│   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
+│   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
+│   ├── sensors/                # y-frame.cfg
+│   ├── system.cfg              # статика Klipper: respond, exclude_object, ...
+│   └── fans/ display/ buttons/ extruder/ ...  # подсистемы
+├── std.macros/                 # общие макросы
+├── std.compil.configs/         # конфиги сборки MCU (НЕ деплоятся)
+└── scripts/                    # deploy/render/check/collect/build/flash
 ```
+
+### Слои и переопределения
+
+- В общих модулях (`std.configs/**`, `std.macros/**`) нет машинного: UUID, PID,
+  токов, измеренных якорей и фактических лимитов.
+- Переопределять ранее заданные секции и опции разрешено только слоям
+  `anchors.cfg`, `machine-extras.cfg` и `std.config.local/`. Валидатор не считает
+  их повторные определения ошибкой.
+- `anchors.cfg` содержит только измеренные факты: `z_positions`, `points`,
+  `safe_z_home`, `zero_reference_position`, реальные `position_max`/`max_z`.
+  Каждый замер помечается строкой `# замер YYYY-MM-DD`; без неё валидатор выдаёт
+  предупреждение.
+- `geometry/*.cfg` — каталожные значения по размеру стола. Их можно использовать
+  для гипотетической машины, пока якоря не измерены, но не выдавать за факт.
 
 ### Модель деплоя
 
-Git-репозиторий живёт только в `~/vorons_configs`. Живой каталог `~/printer_data/config`
-не является git-клоном: он наполняется скриптом `scripts/deploy_configs.sh -p <профиль>`.
+Git-репозиторий живёт только в `~/vorons_configs`. Живой каталог
+`~/printer_data/config` не является git-клоном.
 
-- **managed** — перезаписываются при каждом деплое: `printers/<п>/{printer,macros}.cfg`,
-  `moonraker.conf`, `local/*.cfg` → `std.config.local/`, весь `std.configs/` и `std.macros/`.
-- **seed** — копируются только если файла ещё нет в приёмнике: `KlipperScreen.conf`,
-  `crowsnest.conf`, `sonar.conf`, `telegram.conf`. Так сервисы не теряют свои настройки
-  (автоблок KlipperScreen, реальный `bot_token` Telegram).
-- `std.compil.configs/` в живой каталог не выкладывается: это исходники для сборки прошивок.
+- **managed** — перезаписываются при каждом деплое: `profile.cfg`, `machine.conf`,
+  `anchors.cfg`, `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`,
+  `local/*.cfg` → `std.config.local/`, весь `std.configs/` и `std.macros/`.
+- **seed** — создаются только если файла ещё нет: `printer.cfg`,
+  `KlipperScreen.conf`, `crowsnest.conf`, `sonar.conf`, `telegram.conf`.
+  `printer.cfg` — seed, потому что Klipper дописывает в него блок `SAVE_CONFIG`;
+  при первом деплое после 1.1.0 старый манифест автоматически заменяется
+  заглушкой (с резервной копией, а существующий autosave-блок переносится).
+- `std.compil.configs/` в живой каталог не выкладывается: это исходники прошивок.
+- `--prune` (по умолчанию) удаляет только известные устаревшие пути:
+  `std.configs/{gantry,pinout,tc.ext}/`, корневой `printers/` (осколок 1.1.0),
+  `*.old`, `*.bkp`.
 
 ### Рабочий цикл
 
 ```bash
-# 1. Правки/тюнинг на принтере; забрать локальные сохранения в репозиторий
-~/vorons_configs/scripts/collect_local.sh -p voron-t
-cd ~/vorons_configs && git add printers/voron-t/local && git commit -m "Tune voron-t" && git push
+# 1. Изменить оси/фичи и перерендерить манифест
+cd ~/vorons_configs
+$EDITOR printers/voron-t/machine.conf
+./scripts/deploy_configs.sh -p voron-t --render
+python3 scripts/check_config.py --stale-check
+git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && git push
 
-# 2. На принтере обновить клон и выложить профиль
-cd ~/vorons_configs && git pull --ff-only
+# 2. Оффлайн-проверка без записи в живой каталог
+./scripts/deploy_configs.sh -p voron-t --check
+
+# 3. Матрица всех model × size (гипотетические профили не коммитятся)
+./scripts/deploy_configs.sh -p voron-t --matrix
+./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
+
+# 4. Деплой на принтере
 ./scripts/deploy_configs.sh -p voron-t -b
 sudo systemctl restart klipper moonraker
+
+# 5. Забрать локальный тюнинг и autosave-снимок
+./scripts/collect_local.sh -p voron-t
+git add printers/voron-t/local printers/voron-t/autosave.snapshot.cfg
+git commit -m "Tune voron-t" && git push
 ```
 
-Перед перезапуском полезно проверить дерево офлайн:
+`collect_local.sh` записывает блок `SAVE_CONFIG` из живого `printer.cfg` в
+`printers/<id>/autosave.snapshot.cfg` только для истории. Перенос этих значений в
+`local/` — ручной шаг: они не должны дублировать опции, уже заданные include-файлами.
+
+### Новая машина
 
 ```bash
-./scripts/check_config.py --config-dir ~/printer_data/config
-./scripts/check_config.py --merged ~/printer_data/config > /tmp/merged.cfg
+./scripts/new_machine.sh -p v24-250 --size 250 --model v24 \
+  --features fans,display,buttons,host,y_frame
 ```
+
+Мастер создаёт `machine.conf`, seed-заглушку `printer.cfg`, `anchors.cfg` с TODO,
+`machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, рендерит
+`profile.cfg` и валидирует профиль. Дальше нужно заполнить `local/uuids.cfg` и
+измеренные якоря.
 
 ### Скрипты
 
 | Скрипт | Назначение |
 |---|---|
-| `scripts/deploy_configs.sh -p <профиль>` | выкладка профиля (managed/seed), `-n`, `-b`, `-d` |
-| `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → `printers/<п>/local/` |
-| `scripts/check_config.py` | офлайн-парсер с семантикой Klipper; `--config-dir`, `--merged` |
+| `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix`, `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/render_profile.py --machine-dir <профиль> [--write]` | рендер `profile.cfg` из `machine.conf` |
+| `scripts/check_config.py` | офлайн-парсер: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
+| `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → профиль + autosave-снимок |
+| `scripts/new_machine.sh` | мастер заведения профиля |
 | `scripts/build_mcu.sh -c <config> [-o out]` | сборка прошивки MCU |
 | `scripts/flash_mcu.sh -u <uuid> -f <bin>` | прошивка CAN-MCU через Katapult |
-
-### Профили и альтернативные модули
-
-Имена профилей: `printers/<модель>-<индекс>/` (например, `voron-t`, `voron-2-1`).
-
-В репозитории осознанно хранятся неиспользуемые модули-альтернативы парка:
-`std.configs/pinout/{fly-sb2040,ebb36-v1.2}.cfg`,
-`std.configs/gantry/TMC/xy-tmc5160-LDO-42SHT48-2804AC.cfg`,
-`std.configs/extruder/heads/BMG.8T.cfg`, `std.configs/extruder/tc/104-gt2.cfg`,
-`std.macros/{homing,actions_filament,filament_load_unload}.cfg`,
-`std.configs/tc.ext/y.frame.cfg`, `std.configs/sht36-v3.eddy.cfg`.
-Их не нужно удалять: они включаются в других профилях или при смене головы.
-Секции `[mcu ...]` и CAN-UUID всегда живут в `printers/<п>/local/uuids.cfg`,
-а не в общих pinout-модулях.
 
 ### Секреты
 
 - Не коммитить реальный `bot_token`/`chat_id` в `telegram.conf`: в репозитории заглушка.
-  Если секрет уже попал в историю — сменить токен у бота.
 - Репозиторий приватный; `local/` (UUID, PID, input shaper) коммитится осознанно.
 - `KlipperScreen.conf` содержит автогенерируемый блок `#~#`, поэтому он seed.
 
 ### Известные ограничения
 
-- `std.configs/sd_disable.cfg` пока включает оба пина SD-слотов вместе (`PC0, PC1`).
-  Раздельное управление — после подтверждения электрики слотов.
+- `boards/manta-m8p.cfg` собран по эталону `Voron2_M8P-v2.0_config.cfg`, но на
+  железе не проверялся: только оффлайн-валидация до сборки 2.4.
+- `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
+  они помечены TODO до замера по физическим упорам. Правая сторона треугольника
+  принята равной 245 мм по измерению левой.
+- Маржа `bed_mesh` для размеров кроме 150 — каталожное значение `0.3·S` до
+  замеров на конкретных машинах.
 - Ветка Eddy (`std.configs/sht36-v3.eddy.cfg`) выключена; макросы
   `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` ещё не перенесены с машины-донора.
 
@@ -107,100 +178,170 @@ Repository of configuration files for my Voron printer fleet. The repository is 
 source of truth; the live Klipper directory (`~/printer_data/config`) is populated by
 deploying one printer profile.
 
+### Fleet axes
+
+A machine profile is defined once in `printers/<id>/machine.conf`. Deploy reads it,
+renders `profile.cfg` and validates the result; there is no interactive choice on
+every deploy.
+
+| Key | Values | Purpose |
+|---|---|---|
+| `size` | `150`, `200`, `250`, `300`, `350` | bed size, mm |
+| `model` | `trident`, `v24` | 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
+| `board` | `manta-m5p`, `manta-m8p` | main board (default: trident → m5p, v24 → m8p) |
+| `xy_step` | `0.9`, `1.8` | X/Y motor step angle |
+| `toolhead` | module under `std.configs/boards/` | toolhead board |
+| `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
+| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | optional subsystems |
+| `frame_w`, `frame_d` | mm | outer frame, used for anchor sanity checks |
+| `z_base_measured`, `z_leg_measured` | mm | measured bed triangle sides |
+
+Example `machine.conf`:
+
+```ini
+size=150
+model=trident
+board=manta-m5p
+xy_step=0.9
+toolhead=sht36-v3
+head=HGX.8T
+features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
+frame_w=310
+frame_d=310
+z_base_measured=227
+z_leg_measured=245
+```
+
 ### Repository layout
 
 ```text
 vorons_configs/
 ├── printers/
-│   └── voron-t/                  # printer profile
-│       ├── printer.cfg           # include manifest, [printer] and base sections
-│       ├── macros.cfg            # printer-specific macros
-│       ├── moonraker.conf        # profile Moonraker config
-│       ├── KlipperScreen.conf    # seed
-│       ├── crowsnest.conf        # seed
-│       ├── sonar.conf            # seed
-│       ├── telegram.conf         # seed
-│       └── local/                # SAVE_CONFIG/tuning -> std.config.local/
-├── std.configs/                  # shared Klipper modules
-│   ├── display/mini12864.cfg
-│   ├── extruder/main.cfg
-│   ├── extruder/heads/{HGX,BMG}.8T.cfg
-│   ├── extruder/accel/lis2dw.cfg
-│   └── sd_disable.cfg
-├── std.macros/                   # shared macros
-├── std.compil.configs/           # MCU build configs (NOT deployed)
-├── scripts/                      # deploy/collect/check/build/flash
-├── README.md  CHANGELOG.md  .gitignore
+│   └── voron-t/
+│       ├── machine.conf        # machine axes and features (single source of choice)
+│       ├── profile.cfg         # GENERATED from machine.conf, committed
+│       ├── printer.cfg         # seed: [include profile.cfg] + std.config.local/*
+│       ├── anchors.cfg         # managed: measured anchors and real limits
+│       ├── machine-extras.cfg  # managed: machine overrides (idle_timeout, ...)
+│       ├── macros.cfg          # managed: profile macros
+│       ├── moonraker.conf      # managed
+│       ├── local/              # UUIDs, PID, input shaper, extruder → std.config.local/
+│       └── KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf  # seed
+├── std.configs/
+│   ├── boards/                 # board pinouts: manta-m5p, manta-m8p, toolhead boards
+│   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (drivers)
+│   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
+│   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
+│   ├── sensors/                # y-frame.cfg
+│   ├── system.cfg              # static Klipper sections: respond, exclude_object, ...
+│   └── fans/ display/ buttons/ extruder/ ...  # subsystems
+├── std.macros/                 # shared macros
+├── std.compil.configs/         # MCU build configs (NOT deployed)
+└── scripts/                    # deploy/render/check/collect/build/flash
 ```
+
+### Layers and overrides
+
+- Shared modules (`std.configs/**`, `std.macros/**`) contain no machine data: no
+  UUIDs, PID values, currents, measured anchors or real limits.
+- Only `anchors.cfg`, `machine-extras.cfg` and `std.config.local/` may reopen
+  sections. The validator does not treat their repeated definitions as errors.
+- `anchors.cfg` holds measured facts only: `z_positions`, `points`, `safe_z_home`,
+  `zero_reference_position`, real `position_max`/`max_z`. Every measurement is marked
+  with `# замер YYYY-MM-DD`; otherwise the validator warns.
+- `geometry/*.cfg` contains catalog values for a bed size. They may be used for a
+  hypothetical machine before anchors are measured, but must not be presented as
+  measured facts.
 
 ### Deployment model
 
 The git repository lives only in `~/vorons_configs`. The live directory
-`~/printer_data/config` is not a git clone; it is populated by
-`scripts/deploy_configs.sh -p <profile>`.
+`~/printer_data/config` is not a git clone.
 
-- **managed** — overwritten on every deploy: `printers/<p>/{printer,macros}.cfg`,
-  `moonraker.conf`, `local/*.cfg` → `std.config.local/`, all of `std.configs/` and `std.macros/`.
-- **seed** — copied only when missing in the destination: `KlipperScreen.conf`,
-  `crowsnest.conf`, `sonar.conf`, `telegram.conf`. This preserves service-generated state
-  (the KlipperScreen auto block, a real Telegram `bot_token`).
-- `std.compil.configs/` is never deployed: it holds MCU firmware build configs.
+- **managed** — overwritten on every deploy: `profile.cfg`, `machine.conf`,
+  `anchors.cfg`, `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`,
+  `local/*.cfg` → `std.config.local/`, all of `std.configs/` and `std.macros/`.
+- **seed** — created only when missing: `printer.cfg`, `KlipperScreen.conf`,
+  `crowsnest.conf`, `sonar.conf`, `telegram.conf`. `printer.cfg` is a seed because
+  Klipper appends `SAVE_CONFIG` output to it; on the first deploy after 1.1.0 the
+  old manifest is replaced automatically (with a backup, and an existing autosave
+  block is carried over).
+- `std.compil.configs/` is never deployed: it holds firmware build configs.
+- `--prune` (default) removes only known legacy paths:
+  `std.configs/{gantry,pinout,tc.ext}/`, the root `printers/` leftover from 1.1.0,
+  `*.old`, `*.bkp`.
 
 ### Workflow
 
 ```bash
-# 1. Edit/tune on the printer, then collect local overrides into the repository
-~/vorons_configs/scripts/collect_local.sh -p voron-t
-cd ~/vorons_configs && git add printers/voron-t/local && git commit -m "Tune voron-t" && git push
+# 1. Change axes/features and regenerate the manifest
+cd ~/vorons_configs
+$EDITOR printers/voron-t/machine.conf
+./scripts/deploy_configs.sh -p voron-t --render
+python3 scripts/check_config.py --stale-check
+git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && git push
 
-# 2. On the printer, update the clone and deploy the profile
-cd ~/vorons_configs && git pull --ff-only
+# 2. Offline check, nothing is written to the live tree
+./scripts/deploy_configs.sh -p voron-t --check
+
+# 3. Matrix of all model x size combos (hypothetical profiles are not committed)
+./scripts/deploy_configs.sh -p voron-t --matrix
+./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
+
+# 4. Deploy on the printer
 ./scripts/deploy_configs.sh -p voron-t -b
 sudo systemctl restart klipper moonraker
+
+# 5. Collect local tuning and the autosave snapshot
+./scripts/collect_local.sh -p voron-t
+git add printers/voron-t/local printers/voron-t/autosave.snapshot.cfg
+git commit -m "Tune voron-t" && git push
 ```
 
-Validate the tree offline before restarting:
+`collect_local.sh` records the `SAVE_CONFIG` block from the live `printer.cfg` into
+`printers/<id>/autosave.snapshot.cfg` for history only. Moving those values into
+`local/` is a manual step: they must not duplicate options already set by includes.
+
+### New machine
 
 ```bash
-./scripts/check_config.py --config-dir ~/printer_data/config
-./scripts/check_config.py --merged ~/printer_data/config > /tmp/merged.cfg
+./scripts/new_machine.sh -p v24-250 --size 250 --model v24 \
+  --features fans,display,buttons,host,y_frame
 ```
+
+The wizard creates `machine.conf`, a seed `printer.cfg`, a TODO `anchors.cfg`,
+`machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, renders
+`profile.cfg` and validates the profile. Next, fill `local/uuids.cfg` and the
+measured anchors.
 
 ### Scripts
 
 | Script | Purpose |
 |---|---|
-| `scripts/deploy_configs.sh -p <profile>` | deploy a profile (managed/seed), `-n`, `-b`, `-d` |
-| `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → `printers/<p>/local/` |
-| `scripts/check_config.py` | offline parser with Klipper semantics; `--config-dir`, `--merged` |
+| `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix`, `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/render_profile.py --machine-dir <profile> [--write]` | render `profile.cfg` from `machine.conf` |
+| `scripts/check_config.py` | offline parser: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
+| `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → profile + autosave snapshot |
+| `scripts/new_machine.sh` | profile creation wizard |
 | `scripts/build_mcu.sh -c <config> [-o out]` | build MCU firmware |
 | `scripts/flash_mcu.sh -u <uuid> -f <bin>` | flash a CAN MCU through Katapult |
-
-### Profiles and alternative modules
-
-Profile names: `printers/<model>-<index>/` (for example `voron-t`, `voron-2-1`).
-
-The repository intentionally keeps unused fleet-alternative modules:
-`std.configs/pinout/{fly-sb2040,ebb36-v1.2}.cfg`,
-`std.configs/gantry/TMC/xy-tmc5160-LDO-42SHT48-2804AC.cfg`,
-`std.configs/extruder/heads/BMG.8T.cfg`, `std.configs/extruder/tc/104-gt2.cfg`,
-`std.macros/{homing,actions_filament,filament_load_unload}.cfg`,
-`std.configs/tc.ext/y.frame.cfg`, `std.configs/sht36-v3.eddy.cfg`.
-Do not delete them: other profiles or toolhead swaps use them.
-`[mcu ...]` sections and CAN UUIDs always live in `printers/<p>/local/uuids.cfg`,
-never in shared pinout modules.
 
 ### Secrets
 
 - Never commit a real `bot_token`/`chat_id` in `telegram.conf`; the repository keeps a
-  placeholder. If a secret ever reaches history, rotate the bot token.
+  placeholder.
 - The repository is private; `local/` (UUIDs, PID, input shaper) is committed deliberately.
 - `KlipperScreen.conf` contains a generated `#~#` block, which is why it is a seed file.
 
 ### Known limitations
 
-- `std.configs/sd_disable.cfg` currently drives both SD-slot pins together (`PC0, PC1`).
-  Separate control requires confirming the slot wiring.
+- `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference but has
+  not been validated on hardware: offline validation only until the 2.4 is built.
+- voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
+  until the physical stops are measured. The right triangle side is assumed 245 mm
+  from the measured left side.
+- `bed_mesh` margin for sizes other than 150 is the catalog value `0.3·S` until each
+  machine is measured.
 - The Eddy branch (`std.configs/sht36-v3.eddy.cfg`) is disabled; the
   `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` files have not been copied from the donor
   machine yet.
