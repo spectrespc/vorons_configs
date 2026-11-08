@@ -59,6 +59,13 @@ FEATURES = {
     "eddy": ["std.configs/sht36-v3.eddy.cfg"],
 }
 
+# A feature that physically lives on the extra extruder MCU must never be
+# enabled on a machine without it: the pins would reference an undeclared MCU.
+FEATURE_DEPENDENCIES = {
+    "belay": "extra_extruder",
+    "btt_sfs": "extra_extruder",
+}
+
 KNOWN_KEYS = {
     "size",
     "model",
@@ -190,6 +197,13 @@ def validate(values: dict[str, str]) -> dict[str, object]:
             )
         if name not in features:
             features.append(name)
+
+    for name, required in FEATURE_DEPENDENCIES.items():
+        if name in features and required not in features:
+            raise ProfileError(
+                "feature %r requires %r: its sensors are wired to the extra "
+                "extruder MCU" % (name, required)
+            )
 
     numeric: dict[str, float] = {}
     for key in ("frame_w", "frame_d", "z_base_measured", "z_leg_measured"):

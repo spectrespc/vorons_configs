@@ -66,6 +66,27 @@ CATALOG_PREFIXES = (
 # duplicate-section and repeated-option diagnostics are expected noise.
 OVERRIDE_FILES = ("anchors.cfg", "machine-extras.cfg")
 
+# Options whose value names an MCU (or a board_pins alias that maps to one).
+# They are not pin references, so they are resolved as plain names.
+MCU_NAME_OPTIONS = ("mcu", "sensor_mcu", "i2c_mcu", "spi_mcu")
+
+# A Klipper pin reference is "chip:PIN" and may carry !, ^ or ~ modifiers.
+# The chip part can be an MCU name or a board_pins alias; in this repository an
+# alias is always named after the MCU it belongs to, so a single check on the
+# original option text covers both. "<GND>"-style aliases contain no colon.
+PIN_REFERENCE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_-]*):([A-Za-z][A-Za-z0-9_]*)"
+)
+
+# Klipper virtual pins look like a chip reference but are provided by the
+# probe/TMC module itself, not by an MCU.
+VIRTUAL_PIN_SUFFIXES = ("virtual_endstop", "z_virtual_endstop")
+
+# MCU names that are valid even without an explicit reference: the implicit
+# motherboard and the host micro-controller (its GPIO and host sensors may be
+# unused on a particular machine).
+IMPLICIT_MCUS = ("mcu", "host")
+
 
 def _rel(path: str, root: str) -> str:
     try:
@@ -564,6 +585,85 @@ class Checker:
                         % anchors
                     )
 
+    # -- MCU references ------------------------------------------------
+    def _location(self, section: str, option: str | None = None) -> str:
+        key = (section, option) if option is not None else None
+        first = self.option_first.get(key) if key is not None else None
+        if first is None:
+            first = self.section_first.get(section)
+        if first is None:
+            return ""
+        return " (%s:%d)" % first
+
+    def declared_mcus(self) -> set[str]:
+        declared = {"mcu"}
+        for section in self.fileconfig.sections():
+            parts = section.split(None, 1)
+            if parts[0].lower() == "mcu":
+                declared.add(parts[1].strip() if len(parts) > 1 else "mcu")
+        return declared
+
+    def check_mcu_references(self) -> None:
+        """Verify that every MCU is declared and every declaration is used.
+
+        Klipper resolves a pin as ``[mcu NAME]`` + ``NAME:PIN`` (or through a
+        ``[board_pins]`` alias of that MCU). A prefix without a matching
+        ``[mcu NAME]`` aborts Klipper at startup, and a declared MCU with no
+        references makes Klipper wait forever for a node that is not wired.
+        """
+        declared = self.declared_mcus()
+        referenced: set[str] = set()
+        reported: set[str] = set()
+
+        def report_undeclared(name: str, where: str) -> None:
+            if name in declared or name in reported:
+                return
+            reported.add(name)
+            self.error(
+                "MCU %r is referenced%s but not declared; add [mcu %s] to "
+                "local/uuids.cfg or disable the feature that uses it"
+                % (name, where, name)
+            )
+
+        for section in self.fileconfig.sections():
+            for option in self.fileconfig.options(section):
+                value = self.fileconfig.get(section, option).strip()
+                if not value:
+                    continue
+                if option.lower() in MCU_NAME_OPTIONS:
+                    # Plain MCU name; never a path such as a host serial device.
+                    if not value.startswith(("/", "~")) and " " not in value:
+                        referenced.add(value)
+                        report_undeclared(
+                            value,
+                            " by [%s] %s%s"
+                            % (section, option, self._location(section, option)),
+                        )
+                for match in PIN_REFERENCE_RE.finditer(value):
+                    if match.group(2) in VIRTUAL_PIN_SUFFIXES:
+                        continue
+                    name = match.group(1)
+                    referenced.add(name)
+                    report_undeclared(
+                        name,
+                        " by %r in [%s] %s%s"
+                        % (
+                            match.group(0),
+                            section,
+                            option,
+                            self._location(section, option),
+                        ),
+                    )
+
+        for name in sorted(declared):
+            if name in IMPLICIT_MCUS or name in referenced:
+                continue
+            self.warning(
+                "[mcu %s] is declared%s but nothing references it; remove the "
+                "section (and the CAN node behind it) when the machine has no "
+                "such board" % (name, self._location("mcu " + name))
+            )
+
     def _compare_measurement(self, label: str, computed: float, measured: float) -> None:
         if abs(computed - measured) > 2.0:
             self.warning(
@@ -705,6 +805,7 @@ def run_checks(
         checker = Checker()
         checker.parse_file(filename, include_dirs, local_dir)
         checker.check_geometry(machine_conf)
+        checker.check_mcu_references()
         checker.emit(stream=sys.stdout)
         had_errors = had_errors or bool(checker.errors)
         all_included |= checker.included
