@@ -60,7 +60,7 @@ z_leg_measured=245
 
 Вентиляторы v24/M8P: `FAN0` — питание стола (`heater_bed.heater_pin`),
 `FAN1` — `filter_fan`, `FAN2` — `psu_fan`, `FAN3` — `board_fan`
-(`controller_fan`, 80% при работе, 30% в простое), `FAN4` — `exhaust_fan`.
+(`controller_fan`, 30% при работе и в простое), `FAN4` — `exhaust_fan`.
 На M5P прежняя раскладка: `FAN0` — `driver_fan`, `FAN1` — `drivers_fan`,
 `filter_fan`/`exhaust_fan` — на `HEAT_HE1`/`HEAT_HE0`. Поэтому `fans/`
 содержит каталоги `manta-m5p/` и `manta-m8p/`.
@@ -387,7 +387,7 @@ three-point Steinhart-Hart fit (10/60/100 C), within 0.02 C of the table.
 
 v24/M8P fans: `FAN0` is the bed power output (`heater_bed.heater_pin`), `FAN1`
 is `filter_fan`, `FAN2` is `psu_fan`, `FAN3` is `board_fan` (`controller_fan`,
-80% while active, 30% idle), and `FAN4` is `exhaust_fan`. The M5P keeps its old
+30% while active and idle), and `FAN4` is `exhaust_fan`. The M5P keeps its old
 layout: `FAN0` `driver_fan`, `FAN1` `drivers_fan`, and `filter_fan`/`exhaust_fan`
 on `HEAT_HE1`/`HEAT_HE0`. That is why `fans/` has `manta-m5p/` and
 `manta-m8p/` directories.

@@ -55,7 +55,7 @@ Every entry is provided in Russian and English.
 
 - **RU:** Раскладка вентиляторов v24/M8P: `FAN0` — питание стола
   (`heater_bed.heater_pin`), `FAN1` — `filter_fan`, `FAN2` — `psu_fan`,
-  `FAN3` — `board_fan` (`controller_fan`), `FAN4` — `exhaust_fan`;
+  `FAN3` — `board_fan` (`controller_fan`, 30%), `FAN4` — `exhaust_fan`;
   `fans/` разделён на `manta-m5p/` и `manta-m8p/`. На тестовой 2.4
   подтверждены пины FAN0–FAN4, Klipper выходит в `ready`.
   **EN:** v24/M8P fan map: `FAN0` bed power (`heater_bed.heater_pin`), `FAN1`
