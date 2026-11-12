@@ -12,7 +12,8 @@ ID=""
 SIZE=""
 MODEL=""
 BOARD=""
-XY_STEP="0.9"
+XY_STEP=""
+XY_DRIVER=""
 TOOLHEAD="sht36-v3"
 HEAD="HGX.8T"
 FEATURES=""
@@ -36,7 +37,10 @@ Required:
 
 Optional:
       --board NAME    manta-m5p or manta-m8p (default: per model)
-      --xy-step V     0.9 or 1.8 (default: 0.9)
+      --xy-step V     0.9 only for 150 mm, 1.8 for larger machines
+                      (default: 0.9 at 150, 1.8 otherwise)
+      --xy-driver NAME tmc5160-17HM19-1684 or
+                      tmc5160-LDO-42STH48-2804AC (default follows xy-step)
       --toolhead NAME toolhead board module (default: sht36-v3, empty to omit)
       --head NAME     extruder head module (default: HGX.8T, empty to omit)
       --features LIST comma separated: fans,display,buttons,belay,
@@ -58,6 +62,7 @@ while (($#)); do
     --model)      MODEL="${2:?missing value for $1}"; shift 2 ;;
     --board)      BOARD="${2:?missing value for $1}"; shift 2 ;;
     --xy-step)    XY_STEP="${2:?missing value for $1}"; shift 2 ;;
+    --xy-driver)  XY_DRIVER="${2:?missing value for $1}"; shift 2 ;;
     --toolhead)   TOOLHEAD="${2-}"; shift 2 ;;
     --head)       HEAD="${2-}"; shift 2 ;;
     --features)   FEATURES="${2:?missing value for $1}"; FEATURES_SET=1; shift 2 ;;
@@ -73,6 +78,12 @@ done
 [[ -n "$SIZE" ]] || { echo "--size is required." >&2; exit 2; }
 [[ -n "$MODEL" ]] || { echo "--model is required." >&2; exit 2; }
 [[ "$ID" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid profile id: $ID" >&2; exit 2; }
+
+# Only the 150 mm machine uses 0.9 degree X/Y motors; the rest of the fleet
+# uses LDO-42STH48-2804AC (1.8 degree) on TMC5160.
+if [[ -z "$XY_STEP" ]]; then
+  if [[ "$SIZE" == "150" ]]; then XY_STEP="0.9"; else XY_STEP="1.8"; fi
+fi
 
 # An interactive wizard asks for the feature set instead of silently creating a
 # machine without any optional subsystem. Scripted callers keep --features.
@@ -120,6 +131,9 @@ fi
     echo "board=$BOARD"
   fi
   echo "xy_step=$XY_STEP"
+  if [[ -n "$XY_DRIVER" ]]; then
+    echo "xy_driver=$XY_DRIVER"
+  fi
   if [[ -n "$TOOLHEAD" ]]; then
     echo "toolhead=$TOOLHEAD"
   fi

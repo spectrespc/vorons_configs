@@ -2,7 +2,8 @@
 # Flash a Klipper binary to one MCU of the fleet.
 #
 # Commands map to the MCU kinds in README "Flashing controllers":
-#   can     Katapult over CAN (main board, toolhead, extra extruder)
+#   can     Katapult over CAN (toolhead, extra extruder, non-bridge main board)
+#   bridge  USB-CAN bridge MCU: request bootloader over CAN, upload over USB/DFU
 #   query   list Katapult CAN nodes and their UUIDs
 #   serial  Katapult over a USB serial port (/dev/ttyACM0)
 #   dfu     STM32 DFU, first-time Katapult install (mass erase!)
@@ -29,6 +30,10 @@ OUT=""
 JOBS="4"
 DO_SETUP=0
 DRY_RUN=0
+NO_SERVICE=0
+TIMEOUT=30
+BRIDGE_METHOD="auto"
+APP_ADDRESS=""
 
 usage() {
   cat <<'EOF'
@@ -37,7 +42,9 @@ Usage: flash_mcu.sh [COMMAND] [options]
 Flash a Klipper binary to one MCU.
 
 Commands:
-  can       (default) flash over CAN through Katapult
+  can       (default) flash one CAN node through Katapult
+  bridge    update a USB-CAN bridge MCU: request the bootloader over CAN, then
+            upload over USB (Katapult) or STM32 DFU without mass erase
   query     list CAN nodes and UUIDs (Katapult, no service stop)
   serial    flash over serial through Katapult (/dev/ttyACM0)
   dfu       flash through STM32 DFU; mass-erase wipes the bootloader
@@ -47,13 +54,17 @@ Options:
   -f, --file BIN       firmware binary (klipper.bin/katapult.bin)
   -u, --uuid UUID      CAN UUID, 12 lowercase hex chars; prompted if omitted
   -i, --interface IF   CAN interface (default: can0)
-  -d, --device DEV     serial port (default: /dev/ttyACM0) or DFU id
-                       (default: 0483:df11)
+  -d, --device DEV     serial port (default: auto for "bridge", /dev/ttyACM0
+                       for "serial") or DFU id (default: 0483:df11)
   -b, --baud N         serial baud rate (default: 250000)
-  -c, --config FILE    Kconfig for "linux" (default:
-                       std.compil.configs/config_linux)
+  -c, --config FILE    Kconfig for "linux" and for the DFU app address
   -o, --out DIR        "linux" build directory (default: ~/klipper/out/config_linux)
   -j, --jobs N         "linux" build jobs (default: 4)
+      --method M       "bridge" bootloader upload: auto, usb or dfu (default: auto)
+      --app-address A  "bridge" DFU application address (default: from the
+                       Kconfig CONFIG_FLASH_APPLICATION_ADDRESS)
+      --timeout N      seconds to wait for the bootloader device (default: 30)
+      --no-service     do not stop/start klipper (the caller manages it)
       --setup          "linux" one-time host setup: klipper-mcu.service,
                        sysctl realtime limit, tty group (idempotent)
       --dry-run        print the commands and exit without executing
@@ -62,10 +73,15 @@ Options:
 Examples:
   flash_mcu.sh query
   flash_mcu.sh can -u 7082e04ea1c9 -f ~/klipper/out/config_sht42_v1/klipper.bin
+  flash_mcu.sh bridge -u 993331fd8db1 -f ~/klipper/out/config_m5p_v1/klipper.bin
   flash_mcu.sh serial -f ~/klipper/out/config_sht36_v3/klipper.bin
   flash_mcu.sh dfu -f ~/klipper/out/config_sht42_katapult.v1/katapult.bin
   flash_mcu.sh linux --setup
   flash_mcu.sh linux
+
+For a USB-CAN bridge the host CAN interface is provided by the board itself,
+so it cannot be flashed over that same interface: "bridge" resets it into the
+bootloader over CAN and uploads the application over USB or DFU.
 
 Katapult is expected in ~/katapult; override with KATAPULT_DIR. The shell is
 interactive by design: sudo and the UUID prompt need a console.
@@ -138,13 +154,17 @@ cmd_can() {
   require_katapult
   local uuid="${UUID:-<uuid>}"
   if (( DRY_RUN )); then
-    printf '+ sudo service klipper stop   # only if klipper is active\n'
+    if (( ! NO_SERVICE )); then
+      printf '+ sudo service klipper stop   # only if klipper is active\n'
+    fi
     printf '+ %s %s -i %s -u %s -f %s -v\n' \
       "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" "$IFACE" "$uuid" "$BIN"
-    printf '+ sudo service klipper start  # restore the previous state\n'
+    if (( ! NO_SERVICE )); then
+      printf '+ sudo service klipper start  # restore the previous state\n'
+    fi
     return 0
   fi
-  if systemctl is-active --quiet klipper; then
+  if (( ! NO_SERVICE )) && systemctl is-active --quiet klipper; then
     KLI_WAS_ACTIVE=1
     trap start_klipper_again EXIT
     sudo service klipper stop
@@ -156,6 +176,184 @@ cmd_can() {
 cmd_query() {
   require_katapult
   run "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" -i "$IFACE" -q
+}
+
+# --- USB-CAN bridge bootloader ------------------------------------------------
+
+is_klipper_bridge_interface() {
+  local dev net mfr
+  for dev in /sys/bus/usb/devices/*; do
+    [[ -f "$dev/idVendor" && -f "$dev/idProduct" ]] || continue
+    [[ "$(cat "$dev/idVendor")" == "1d50" ]] || continue
+    [[ "$(cat "$dev/idProduct")" == "606f" ]] || continue
+    [[ -f "$dev/manufacturer" ]] || continue
+    mfr="$(<"$dev/manufacturer")"
+    [[ "${mfr,,}" == "klipper" ]] || continue
+    for net in "$dev"/*/net/"$IFACE"; do
+      [[ -e "$net" ]] && return 0
+    done
+  done
+  return 1
+}
+
+usb_id_present() {
+  local dev
+  for dev in /sys/bus/usb/devices/*; do
+    [[ -f "$dev/idVendor" && -f "$dev/idProduct" ]] || continue
+    [[ "$(cat "$dev/idVendor")" == "$1" ]] || continue
+    [[ "$(cat "$dev/idProduct")" == "$2" ]] || continue
+    return 0
+  done
+  return 1
+}
+
+katapult_tty() {
+  local link dev ttydir
+  for link in /dev/serial/by-id/*[Kk]atapult*; do
+    [[ -e "$link" ]] || continue
+    printf '%s\n' "$link"
+    return 0
+  done
+  # Some Katapult builds expose only a ttyACM node; identify it by USB id.
+  for dev in /sys/bus/usb/devices/*; do
+    [[ -f "$dev/idVendor" && -f "$dev/idProduct" ]] || continue
+    [[ "$(cat "$dev/idVendor")" == "1d50" ]] || continue
+    [[ "$(cat "$dev/idProduct")" == "6177" ]] || continue
+    for ttydir in "$dev"/*/tty/tty* "$dev"/tty/tty*; do
+      [[ -e "$ttydir" ]] || continue
+      printf '/dev/%s\n' "${ttydir##*/}"
+      return 0
+    done
+  done
+  return 1
+}
+
+dfu_app_address() {
+  local cfg="$1" value=""
+  if [[ -n "$cfg" && -f "$cfg" ]]; then
+    value="$(sed -n 's/^CONFIG_FLASH_APPLICATION_ADDRESS=//p' "$cfg" | tail -n1)"
+  fi
+  printf '%s\n' "${value:-0x08002000}"
+}
+
+# Print "usb:<device>" or "dfu:<id>" once the bridge bootloader appears.
+find_bridge_bootloader() {
+  local deadline=$((SECONDS + TIMEOUT)) dev
+  if [[ -n "$DEVICE" ]]; then
+    if [[ "$DEVICE" == *:* ]]; then
+      printf 'dfu:%s\n' "$DEVICE"
+      return 0
+    fi
+    [[ -e "$DEVICE" ]] || DEVICE="/dev/$DEVICE"
+    printf 'usb:%s\n' "$DEVICE"
+    return 0
+  fi
+  while (( SECONDS < deadline )); do
+    if [[ "$BRIDGE_METHOD" != "dfu" ]] && dev="$(katapult_tty)"; then
+      printf 'usb:%s\n' "$dev"
+      return 0
+    fi
+    if [[ "$BRIDGE_METHOD" != "usb" ]] && usb_id_present 0483 df11; then
+      printf 'dfu:0483:df11\n'
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+wait_for_can_interface() {
+  local deadline=$((SECONDS + TIMEOUT))
+  command -v ip >/dev/null 2>&1 || return 0
+  while (( SECONDS < deadline )); do
+    if ip link show "$IFACE" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+cmd_bridge() {
+  resolve_uuid
+  require_file
+  require_katapult
+  case "$BRIDGE_METHOD" in
+    auto|usb|dfu) ;;
+    *) die "--method must be auto, usb or dfu (got '$BRIDGE_METHOD')" ;;
+  esac
+
+  local config_path="" target
+  if [[ -n "$CONFIG" ]]; then
+    [[ "$CONFIG" = /* ]] || CONFIG="$REPO/$CONFIG"
+    [[ -f "$CONFIG" ]] || die "Kconfig not found: $CONFIG"
+    config_path="$CONFIG"
+  fi
+  [[ -n "$APP_ADDRESS" ]] || APP_ADDRESS="$(dfu_app_address "$config_path")"
+
+  if (( DRY_RUN )); then
+    if (( ! NO_SERVICE )); then
+      printf '+ sudo service klipper stop   # only if klipper is active\n'
+    fi
+    printf '+ check that %s is a Klipper USB-CAN bridge\n' "$IFACE"
+    printf '+ %s %s -i %s -u %s -r -v\n' \
+      "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" "$IFACE" "${UUID:-<uuid>}"
+    case "$BRIDGE_METHOD" in
+      usb) target="Katapult USB" ;;
+      dfu) target="DFU 0483:df11" ;;
+      *)   target="Katapult USB or DFU 0483:df11 (auto)" ;;
+    esac
+    printf '+ wait up to %ss for %s\n' "$TIMEOUT" "$target"
+    if [[ "$BRIDGE_METHOD" != "dfu" ]]; then
+      printf '+ %s %s -d <katapult-tty> -b %s -f %s\n' \
+        "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" "$BAUD" "$BIN"
+    fi
+    if [[ "$BRIDGE_METHOD" != "usb" ]]; then
+      printf '+ sudo dfu-util -R -a 0 -s %s:leave -D %s -d 0483:df11\n' \
+        "$APP_ADDRESS" "$BIN"
+    fi
+    printf '+ wait up to %ss for CAN interface %s\n' "$TIMEOUT" "$IFACE"
+    if (( ! NO_SERVICE )); then
+      printf '+ sudo service klipper start  # restore the previous state\n'
+    fi
+    return 0
+  fi
+
+  if (( ! NO_SERVICE )) && systemctl is-active --quiet klipper; then
+    KLI_WAS_ACTIVE=1
+    trap start_klipper_again EXIT
+    sudo service klipper stop
+  fi
+
+  is_klipper_bridge_interface || die \
+    "$IFACE is not provided by a Klipper USB-CAN bridge; use 'can' for a normal CAN node"
+
+  printf 'Requesting the bootloader for %s on %s\n' "$UUID" "$IFACE"
+  "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" \
+    -i "$IFACE" -u "$UUID" -r -v
+
+  local target kind device
+  target="$(find_bridge_bootloader)" || die \
+    "bootloader device did not appear within ${TIMEOUT}s; the bridge may need a power cycle or a USB/DFU-capable Katapult"
+  kind="${target%%:*}"
+  device="${target#*:}"
+  case "$kind" in
+    usb)
+      printf 'Uploading over Katapult USB: %s\n' "$device"
+      "$PYTHON_BIN" "$KATAPULT_DIR/scripts/flashtool.py" \
+        -d "$device" -b "$BAUD" -f "$BIN"
+      ;;
+    dfu)
+      command -v dfu-util >/dev/null 2>&1 || die \
+        "dfu-util is missing; install it with: sudo apt install dfu-util"
+      printf 'Uploading over DFU at %s (bootloader preserved)\n' "$APP_ADDRESS"
+      sudo dfu-util -R -a 0 -s "${APP_ADDRESS}:leave" -D "$BIN" -d "$device"
+      ;;
+  esac
+
+  wait_for_can_interface || die \
+    "firmware uploaded but CAN interface $IFACE did not return; check the board and Klipper bridge flash"
+  printf 'Bridge %s updated; %s is available again\n' "$UUID" "$IFACE"
 }
 
 cmd_serial() {
@@ -234,6 +432,10 @@ while (($#)); do
     -c|--config)    CONFIG="${2:?missing value for $1}"; shift 2 ;;
     -o|--out)       OUT="${2:?missing value for $1}"; shift 2 ;;
     -j|--jobs)      JOBS="${2:?missing value for $1}"; shift 2 ;;
+    --method)       BRIDGE_METHOD="${2:?missing value for $1}"; shift 2 ;;
+    --app-address)  APP_ADDRESS="${2:?missing value for $1}"; shift 2 ;;
+    --timeout)      TIMEOUT="${2:?missing value for $1}"; shift 2 ;;
+    --no-service)   NO_SERVICE=1; shift ;;
     --setup)        DO_SETUP=1; shift ;;
     --dry-run)      DRY_RUN=1; shift ;;
     -h|--help)      usage; exit 0 ;;
@@ -242,6 +444,9 @@ while (($#)); do
 done
 
 KLI_WAS_ACTIVE=0
+if [[ ! "$TIMEOUT" =~ ^[0-9]+$ ]] || (( TIMEOUT <= 0 )); then
+  die "--timeout must be a positive integer"
+fi
 
 if (( DO_SETUP )) && [[ "$COMMAND" != linux ]]; then
   die "--setup is only valid with the 'linux' command"
@@ -249,6 +454,7 @@ fi
 
 case "$COMMAND" in
   can)    cmd_can ;;
+  bridge) cmd_bridge ;;
   query)  cmd_query ;;
   serial) cmd_serial ;;
   dfu)    cmd_dfu ;;

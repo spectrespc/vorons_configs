@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy one printer profile from this repository into the live config tree.
 #
-# The fleet axes (size/model/board/xy_step) are read once from
+# The fleet axes (size/model/board/xy_step/xy_driver) are read once from
 # printers/<profile>/machine.conf. deploy renders profile.cfg from them, checks
 # that the committed copy is fresh, builds a staging tree, validates it with
 # check_config.py and only then writes to DEST.

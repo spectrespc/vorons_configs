@@ -16,7 +16,8 @@
 | `size` | `150`, `200`, `250`, `300`, `350` | размер стола, мм |
 | `model` | `trident`, `v24` | 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
 | `board` | `manta-m5p`, `manta-m8p` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
-| `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y |
+| `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150, иначе `1.8` |
+| `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | драйвер/мотор X/Y; по умолчанию следует за `size` |
 | `toolhead` | модуль из `std.configs/boards/` | плата инструментальной головы |
 | `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | подключаемые подсистемы |
@@ -38,6 +39,31 @@ frame_d=310
 z_base_measured=227
 z_leg_measured=245
 ```
+
+Правило парка: только 150×150 использует TMC5160 + 17HM19-1684 (0.9°);
+все остальные размеры — TMC5160 + LDO-42STH48-2804AC (1.8°, 55 Н·см,
+2.8 А/фаза, `run_current: 1.697`). TMC5160 работает в SpreadCycle
+(`stealthchop_threshold: 0`), SPI 1 МГц, `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD =
+0/3/7/8/1/2`. `xy_driver` можно задать явно, но по умолчанию он выбирается по
+`size`, поэтому `--matrix` проверяет обе связки.
+
+Термисторы M8P V2.0 в профиле v24: `THB` — стол, `TH0` — Y-frame
+(NTC 10K B3950, `sensor_type: ntc10k_3950`; встроенный `Generic 3950` —
+это 100K, для 10K-датчика не подходит),
+`TH2`/`TH3` — температуры драйверов TMC5160 (`TH2` через
+`temperature_fan drivers_fan`, `TH3` через `temperature_sensor tmc5160_1`).
+`TH1` не используется. На M5P: `THB` — стол, `TH0` — Y-frame, `TH1` —
+`drivers_fan`. Поэтому `bed/`, `sensors/y-frame/` и `drivers_hv_fan/`
+выбираются по плате. Таблица 10K/B3950 задана в
+`std.configs/sensors/ntc10k-3950.cfg` тремя точками Steinhart-Hart
+(10/60/100 °C), ошибка относительно таблицы — менее 0.02 °C.
+
+Вентиляторы v24/M8P: `FAN0` — питание стола (`heater_bed.heater_pin`),
+`FAN1` — `filter_fan`, `FAN2` — `psu_fan`, `FAN3` — `board_fan`
+(`controller_fan`, 80% при работе, 30% в простое), `FAN4` — `exhaust_fan`.
+На M5P прежняя раскладка: `FAN0` — `driver_fan`, `FAN1` — `drivers_fan`,
+`filter_fan`/`exhaust_fan` — на `HEAT_HE1`/`HEAT_HE0`. Поэтому `fans/`
+содержит каталоги `manta-m5p/` и `manta-m8p/`.
 
 ### Фичи и extra-extruder
 
@@ -86,7 +112,7 @@ vorons_configs/
 │   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (драйверы)
 │   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
 │   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
-│   ├── sensors/                # y-frame.cfg
+│   ├── sensors/                # y-frame/, tmc5160/ (по плате)
 │   ├── system.cfg              # статика Klipper: respond, exclude_object, ...
 │   └── fans/ display/ buttons/ extruder/ ...  # подсистемы
 ├── std.macros/                 # общие макросы
@@ -181,7 +207,9 @@ git commit -m "Tune voron-t" && git push
 | `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → профиль + autosave-снимок |
 | `scripts/new_machine.sh` | мастер заведения профиля (фичи, UUID-шаблон) |
 | `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | сборка `klipper.bin`, `katapult.bin` или `klipper.elf` |
-| `scripts/flash_mcu.sh [can\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
+| `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
+| `scripts/update_firmware.sh [-p профиль] [--dry-run] [--auto]` | пересборка и прошивка всех MCU после обновления Klipper |
+| `scripts/install_update_hook.sh [--profile профиль] [--dry-run]` | установка systemd path/timer хука (нужен sudo) |
 
 ### Прошивка контроллеров
 
@@ -194,6 +222,7 @@ Kconfig в `std.compil.configs/`, `flash_mcu.sh` доставляет его н�
 ```bash
 git clone https://github.com/Arksine/katapult ~/katapult
 sudo apt install python3-serial          # нужен flashtool.py
+sudo apt install dfu-util                # нужен для DFU-ветки bridge
 ```
 
 UUID читается из `local/uuids.cfg` или `flashtool.py -i can0 -q`, но вводится
@@ -202,8 +231,8 @@ UUID читается из `local/uuids.cfg` или `flashtool.py -i can0 -q`, �
 
 | Секция Klipper | Конфиг | Метод | Примечание |
 |---|---|---|---|
-| `mcu` (trident) | `config_m5p_v1` | `can` | M5P, Katapult |
-| `mcu` (v24) | `config_m8p_v2` | `can` | M8P, первая прошивка — `dfu` (Katapult) |
+| `mcu` (M5P, trident) | `config_m5p_v1` | `bridge` | USB-CAN bridge: `can0` создаёт сама плата |
+| `mcu` (M8P, v24) | `config_m8p_v2` | `bridge` | первая установка Katapult — `dfu` |
 | `extruder` | `config_sht36_v3` | `can` | toolhead |
 | `ext-extruder` | `config_sht42_v1` | `can` | загрузчик `config_sht42_katapult.v1` → `dfu` |
 | `host` | `config_linux` | `linux` | process MCU, `make flash` |
@@ -217,6 +246,7 @@ scripts/build_mcu.sh -c std.compil.configs/config_linux --print-bin   # klipper.
 # Прошивка
 scripts/flash_mcu.sh query
 scripts/flash_mcu.sh can -u <uuid> -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh bridge -u <uuid> -f ~/klipper/out/config_m5p_v1/klipper.bin
 scripts/flash_mcu.sh serial -f ~/klipper/out/config_sht36_v3/klipper.bin
 scripts/flash_mcu.sh dfu -f ~/katapult/out/config_sht42_katapult.v1/katapult.bin
 scripts/flash_mcu.sh linux --setup      # разовые системные шаги
@@ -225,15 +255,55 @@ scripts/flash_mcu.sh linux             # make flash
 
 - `can` останавливает `klipper`, если сервис активен, и восстанавливает его
   прежнее состояние после прошивки; `query` сервис не трогает.
+- `bridge` нужен для главной платы в режиме USB-CAN bridge: `can0` предоставляет
+  она сама, поэтому прошить её через этот же CAN нельзя. Команда переводит плату
+  в загрузчик по CAN (`-r`), затем загружает приложение через Katapult-USB или
+  STM32 DFU по адресу `CONFIG_FLASH_APPLICATION_ADDRESS` (без `mass-erase`) и
+  ждёт возвращения `can0`.
+- `--no-service` отключает остановку/запуск Klipper в `can` и `bridge`: его
+  использует `update_firmware.sh`, который управляет сервисом один раз на всю
+  последовательность.
 - `dfu` делает `mass-erase` и стирает загрузчик: только первичная установка
   Katapult на чистую плату. Скрипт требует ввести `yes`; повторные обновления
-  приложения идут через `can`.
+  приложения идут через `can`/`bridge`.
 - `linux --setup` идемпотентно ставит `klipper-mcu.service`, пишет
   `10-disable-rt-group-limit.conf` через `sudo tee` (редирект `sudo echo >` не
   работает), применяет sysctl и добавляет пользователя в группу `tty`. Без
   `--setup` выполняются только сборка и `make flash`.
 - `python3-serial` и `~/katapult` проверяются до прошивки; при отсутствии
   скрипт печатает команды установки и завершается.
+
+### Обновление MCU при обновлении Klipper
+
+`update_firmware.sh` собирает прошивки по `machine.conf` и прошивает их в
+безопасном порядке: сначала `ext-extruder` и `extruder` по CAN, последней —
+главную плату через `bridge`. UUID берутся из развёрнутого
+`std.config.local/uuids.cfg`, в скрипте они не хардкодятся.
+
+```bash
+scripts/update_firmware.sh --dry-run     # только план
+scripts/update_firmware.sh               # сборка и прошивка
+scripts/update_firmware.sh --auto        # режим systemd: пропуск по stamp
+```
+
+Автоматический хук ставится один раз:
+
+```bash
+sudo scripts/install_update_hook.sh --profile voron-t
+```
+
+Он создаёт `klipper-firmware-update.path` (следит за `.git/HEAD` и
+`.git/refs/heads` Klipper) и `klipper-firmware-update.timer` (повтор каждые
+10 минут). При обновлении Klipper сервис ждёт, пока Moonraker закончит
+обновление и принтер не печатает, собирает три прошивки, останавливает
+Klipper, прошивает платы, запускает Klipper и записывает commit в stamp.
+Если идёт печать или обновление, запуск откладывается и повторяется таймером.
+Установка хука не прошивает сразу: текущий commit помечается как уже
+прошитый. Удаление: `sudo scripts/install_update_hook.sh --uninstall`.
+
+Ограничение: загрузчик главной платы должен поддерживать USB (Katapult-USB)
+или ROM DFU. Katapult, настроенный только на CAN, после `-r` заберёт `can0` с
+собой, и плату придётся вывести из загрузчика вручную.
 
 ### Секреты
 
@@ -243,8 +313,9 @@ scripts/flash_mcu.sh linux             # make flash
 
 ### Известные ограничения
 
-- `boards/manta-m8p.cfg` собран по эталону `Voron2_M8P-v2.0_config.cfg`, но на
-  железе не проверялся: только оффлайн-валидация до сборки 2.4.
+- `boards/manta-m8p.cfg` собран по эталону `Voron2_M8P-v2.0_config.cfg` и
+  проверен на тестовой 2.4 350: конфиг загружается, все MCU подключаются; на
+  целевой машине остаётся проверить датчики, драйверы и движение.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -272,7 +343,8 @@ every deploy.
 | `size` | `150`, `200`, `250`, `300`, `350` | bed size, mm |
 | `model` | `trident`, `v24` | 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
 | `board` | `manta-m5p`, `manta-m8p` | main board (default: trident → m5p, v24 → m8p) |
-| `xy_step` | `0.9`, `1.8` | X/Y motor step angle |
+| `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm, otherwise `1.8` |
+| `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | X/Y driver/motor; follows `size` by default |
 | `toolhead` | module under `std.configs/boards/` | toolhead board |
 | `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | optional subsystems |
@@ -294,6 +366,31 @@ frame_d=310
 z_base_measured=227
 z_leg_measured=245
 ```
+
+Fleet rule: only 150x150 uses TMC5160 + 17HM19-1684 (0.9 degree);
+every other size uses TMC5160 + LDO-42STH48-2804AC (1.8 degree, 55 Ncm,
+2.8 A/phase, `run_current: 1.697`). TMC5160 runs in SpreadCycle
+(`stealthchop_threshold: 0`), SPI at 1 MHz, with
+`driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/8/1/2`. `xy_driver` may be set
+explicitly, but by default it follows `size`, so `--matrix` covers both
+combinations.
+
+M8P V2.0 thermistors in the v24 profile: `THB` is the bed, `TH0` the Y-frame
+(NTC 10K B3950, `sensor_type: ntc10k_3950`; the built-in `Generic 3950` is a
+100K table and does not fit a 10K sensor),
+and `TH2`/`TH3` are the two TMC5160 driver temperatures (`TH2` through
+`temperature_fan drivers_fan`, `TH3` through `temperature_sensor tmc5160_1`).
+`TH1` is unused. The M5P uses `THB` bed, `TH0` Y-frame, `TH1` `drivers_fan`;
+therefore `bed/`, `sensors/y-frame/` and `drivers_hv_fan/` are selected by
+board. The 10K/B3950 table lives in `std.configs/sensors/ntc10k-3950.cfg` as a
+three-point Steinhart-Hart fit (10/60/100 C), within 0.02 C of the table.
+
+v24/M8P fans: `FAN0` is the bed power output (`heater_bed.heater_pin`), `FAN1`
+is `filter_fan`, `FAN2` is `psu_fan`, `FAN3` is `board_fan` (`controller_fan`,
+80% while active, 30% idle), and `FAN4` is `exhaust_fan`. The M5P keeps its old
+layout: `FAN0` `driver_fan`, `FAN1` `drivers_fan`, and `filter_fan`/`exhaust_fan`
+on `HEAT_HE1`/`HEAT_HE0`. That is why `fans/` has `manta-m5p/` and
+`manta-m8p/` directories.
 
 ### Features and the extra extruder
 
@@ -342,7 +439,7 @@ vorons_configs/
 │   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (drivers)
 │   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
 │   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
-│   ├── sensors/                # y-frame.cfg
+│   ├── sensors/                # y-frame/, tmc5160/ (per board)
 │   ├── system.cfg              # static Klipper sections: respond, exclude_object, ...
 │   └── fans/ display/ buttons/ extruder/ ...  # subsystems
 ├── std.macros/                 # shared macros
@@ -436,7 +533,9 @@ anchors.
 | `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → profile + autosave snapshot |
 | `scripts/new_machine.sh` | profile creation wizard (features, UUID template) |
 | `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | build `klipper.bin`, `katapult.bin` or `klipper.elf` |
-| `scripts/flash_mcu.sh [can\|query\|serial\|dfu\|linux] ...` | flash one controller |
+| `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | flash one controller |
+| `scripts/update_firmware.sh [-p profile] [--dry-run] [--auto]` | rebuild and flash all MCUs after a Klipper update |
+| `scripts/install_update_hook.sh [--profile profile] [--dry-run]` | install the systemd path/timer hook (needs sudo) |
 
 ### Flashing controllers
 
@@ -449,6 +548,7 @@ Before the first flash:
 ```bash
 git clone https://github.com/Arksine/katapult ~/katapult
 sudo apt install python3-serial          # required by flashtool.py
+sudo apt install dfu-util                # required for the bridge DFU path
 ```
 
 The UUID comes from `local/uuids.cfg` or `flashtool.py -i can0 -q`, but is
@@ -457,8 +557,8 @@ hardcodes a UUID. `--dry-run` prints the commands and changes nothing.
 
 | Klipper section | Config | Method | Note |
 |---|---|---|---|
-| `mcu` (trident) | `config_m5p_v1` | `can` | M5P, Katapult |
-| `mcu` (v24) | `config_m8p_v2` | `can` | M8P, first flash via `dfu` (Katapult) |
+| `mcu` (M5P, trident) | `config_m5p_v1` | `bridge` | USB-CAN bridge: the board itself provides `can0` |
+| `mcu` (M8P, v24) | `config_m8p_v2` | `bridge` | first Katapult install via `dfu` |
 | `extruder` | `config_sht36_v3` | `can` | toolhead |
 | `ext-extruder` | `config_sht42_v1` | `can` | bootloader `config_sht42_katapult.v1` → `dfu` |
 | `host` | `config_linux` | `linux` | process MCU, `make flash` |
@@ -472,6 +572,7 @@ scripts/build_mcu.sh -c std.compil.configs/config_linux --print-bin   # klipper.
 # Flash
 scripts/flash_mcu.sh query
 scripts/flash_mcu.sh can -u <uuid> -f ~/klipper/out/config_sht36_v3/klipper.bin
+scripts/flash_mcu.sh bridge -u <uuid> -f ~/klipper/out/config_m5p_v1/klipper.bin
 scripts/flash_mcu.sh serial -f ~/klipper/out/config_sht36_v3/klipper.bin
 scripts/flash_mcu.sh dfu -f ~/katapult/out/config_sht42_katapult.v1/katapult.bin
 scripts/flash_mcu.sh linux --setup      # one-time host setup
@@ -480,15 +581,55 @@ scripts/flash_mcu.sh linux             # make flash
 
 - `can` stops `klipper` when the service is active and restores its previous
   state after flashing; `query` leaves the service alone.
+- `bridge` is for a main board running as a USB-CAN bridge: `can0` is provided
+  by that board, so it cannot be flashed over the same CAN interface. The
+  command resets it into the bootloader over CAN (`-r`), uploads the application
+  through Katapult-USB or STM32 DFU at `CONFIG_FLASH_APPLICATION_ADDRESS`
+  (without `mass-erase`) and waits for `can0` to return.
+- `--no-service` suppresses the Klipper stop/start in `can` and `bridge`; it is
+  used by `update_firmware.sh`, which manages the service once for the whole
+  sequence.
 - `dfu` performs a `mass-erase`, which wipes the bootloader: use it only for the
   first Katapult install on a blank board. The script requires typing `yes`;
-  later application updates go through `can`.
+  later application updates go through `can`/`bridge`.
 - `linux --setup` idempotently installs `klipper-mcu.service`, writes
   `10-disable-rt-group-limit.conf` through `sudo tee` (a `sudo echo >` redirect
   does not work), applies sysctl and adds the user to the `tty` group. Without
   `--setup` only the build and `make flash` run.
 - `python3-serial` and `~/katapult` are checked before flashing; when missing,
   the script prints the install commands and exits.
+
+### Updating MCUs when Klipper updates
+
+`update_firmware.sh` derives the builds from `machine.conf` and flashes them in
+the safe order: `ext-extruder` and `extruder` over CAN first, the main board
+last through `bridge`. UUIDs are read from the deployed
+`std.config.local/uuids.cfg`, never hardcoded in the script.
+
+```bash
+scripts/update_firmware.sh --dry-run     # plan only
+scripts/update_firmware.sh               # build and flash
+scripts/update_firmware.sh --auto        # systemd mode: skip by stamp
+```
+
+Install the automatic hook once:
+
+```bash
+sudo scripts/install_update_hook.sh --profile voron-t
+```
+
+It creates `klipper-firmware-update.path` (watches Klipper `.git/HEAD` and
+`.git/refs/heads`) and `klipper-firmware-update.timer` (retries every
+10 minutes). After a Klipper update the service waits for Moonraker and the
+printer to be idle, builds the three firmwares, stops Klipper, flashes the
+boards, starts Klipper and records the commit in a stamp. A running print or
+update defers the run and the timer retries it. Installing the hook does not
+flash immediately: the current commit is stamped as already flashed. Remove
+with `sudo scripts/install_update_hook.sh --uninstall`.
+
+Limitation: the main board's bootloader must support USB (Katapult-USB) or ROM
+DFU. A CAN-only Katapult would take `can0` down after `-r` and require manual
+recovery.
 
 ### Secrets
 
@@ -499,8 +640,9 @@ scripts/flash_mcu.sh linux             # make flash
 
 ### Known limitations
 
-- `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference but has
-  not been validated on hardware: offline validation only until the 2.4 is built.
+- `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference and
+  was tested on a 2.4 350: the config loads and every MCU connects; sensors,
+  drivers and motion still need validation on the target machine.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.

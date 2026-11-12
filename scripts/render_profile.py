@@ -34,18 +34,28 @@ SIZES = (150, 200, 250, 300, 350)
 MODELS = ("trident", "v24")
 BOARDS = ("manta-m5p", "manta-m8p")
 XY_STEPS = ("0.9", "1.8")
+XY_DRIVERS = ("tmc5160-17HM19-1684", "tmc5160-LDO-42STH48-2804AC")
 
 DEFAULT_BOARD = {"trident": "manta-m5p", "v24": "manta-m8p"}
+# Fleet rule: only the 150 mm machine uses the 0.9 degree motors.  All other
+# sizes use LDO-42STH48-2804AC (1.8 degree) on TMC5160.
+DEFAULT_XY_STEP = {"150": "0.9"}
+DEFAULT_XY_DRIVER = {
+    "0.9": "tmc5160-17HM19-1684",
+    "1.8": "tmc5160-LDO-42STH48-2804AC",
+}
 
 # Optional modules, emitted in this exact order regardless of the order in
 # machine.conf. A feature may expand to several include files.
 FEATURES = {
     "fans": [
         "std.configs/fans/host_fan.cfg",
-        "std.configs/fans/drivers_hv_fan.cfg",
-        "std.configs/fans/drivers_fan.cfg",
-        "std.configs/fans/filter_fan.cfg",
-        "std.configs/fans/exhaust_fan.cfg",
+        "std.configs/fans/{board}/drivers_hv_fan.cfg",
+        "std.configs/fans/{board}/drivers_fan.cfg",
+        "std.configs/fans/{board}/psu_fan.cfg",
+        "std.configs/fans/{board}/board_fan.cfg",
+        "std.configs/fans/{board}/filter_fan.cfg",
+        "std.configs/fans/{board}/exhaust_fan.cfg",
         "std.configs/fans/mcu_extruder_fan.cfg",
     ],
     "display": ["std.configs/display/mini12864.cfg"],
@@ -55,7 +65,7 @@ FEATURES = {
     "runout": ["std.configs/extruder_runout.cfg"],
     "extra_extruder": ["std.configs/extra-extruder.cfg"],
     "host": ["std.configs/host.cfg"],
-    "y_frame": ["std.configs/sensors/y-frame.cfg"],
+    "y_frame": ["std.configs/sensors/y-frame/{board}.cfg"],
     "eddy": ["std.configs/sht36-v3.eddy.cfg"],
 }
 
@@ -71,6 +81,7 @@ KNOWN_KEYS = {
     "model",
     "board",
     "xy_step",
+    "xy_driver",
     "toolhead",
     "head",
     "features",
@@ -143,6 +154,17 @@ def apply_axis_overrides(values: dict[str, str], overrides: list[str]) -> set[st
                 values["frame_w"] = str(frame)
             if "frame_d" not in keys:
                 values["frame_d"] = str(frame)
+    # The fleet rule is tied to the bed size: only 150 mm uses 0.9 degree
+    # motors, every larger machine uses the 1.8 degree LDO motors.
+    if "size" in keys and "xy_step" not in keys:
+        try:
+            size_key = str(int(float(values["size"])))
+        except (KeyError, ValueError):
+            size_key = values.get("size", "")
+        values["xy_step"] = DEFAULT_XY_STEP.get(size_key, "1.8")
+        values.pop("xy_driver", None)
+    if "xy_step" in keys and "xy_driver" not in keys:
+        values.pop("xy_driver", None)
     return keys
 
 
@@ -172,11 +194,20 @@ def validate(values: dict[str, str]) -> dict[str, object]:
             % (board, ", ".join(BOARDS))
         )
 
-    xy_step = values.get("xy_step", "0.9")
+    xy_step = values.get("xy_step")
+    if xy_step is None:
+        xy_step = DEFAULT_XY_STEP.get(str(size), "1.8")
     if xy_step not in XY_STEPS:
         raise ProfileError(
             "xy_step=%s is not supported (allowed: %s)"
             % (xy_step, ", ".join(XY_STEPS))
+        )
+
+    xy_driver = values.get("xy_driver") or DEFAULT_XY_DRIVER[xy_step]
+    if xy_driver not in XY_DRIVERS:
+        raise ProfileError(
+            "xy_driver=%s is not supported (allowed: %s)"
+            % (xy_driver, ", ".join(XY_DRIVERS))
         )
 
     toolhead = values.get("toolhead")
@@ -220,6 +251,7 @@ def validate(values: dict[str, str]) -> dict[str, object]:
         "model": model,
         "board": board,
         "xy_step": xy_step,
+        "xy_driver": xy_driver,
         "toolhead": toolhead,
         "head": head,
         "features": features,
@@ -252,25 +284,35 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
     if checked["toolhead"]:
         includes.append("std.configs/boards/%s.cfg" % checked["toolhead"])
     includes.append("std.configs/mechanics/%s.cfg" % model)
+    includes.append(
+        "std.configs/mechanics/tmc/xy-%s.cfg" % checked["xy_driver"]
+    )
+    if board == "manta-m8p":
+        # TH2/TH3 monitor the TMC5160 driver heatsinks on the M8P; the M5P
+        # uses those pins for the bed and Y-frame instead.
+        includes.append("std.configs/sensors/tmc5160/%s.cfg" % board)
+        # v24 Y-frame uses a 10K B3950 thermistor, not the 100K Generic 3950.
+        if "y_frame" in features:
+            includes.append("std.configs/sensors/ntc10k-3950.cfg")
     includes.append("std.configs/motors/xy-step-%s.cfg" % xy_step)
     includes.append("std.configs/geometry/%s-%d.cfg" % (model, size))
 
     # Subsystems that must be defined before the extruder/probe sections.
     for name in ("fans", "display", "buttons"):
         if name in features:
-            includes.extend(FEATURES[name])
+            includes.extend(path.format(board=board) for path in FEATURES[name])
     includes.append("std.configs/probe.cfg")
-    includes.append("std.configs/bed.cfg")
+    includes.append("std.configs/bed/%s.cfg" % board)
     if checked["head"]:
         includes.append("std.configs/extruder/heads/%s.cfg" % checked["head"])
     includes.append("std.configs/extruder/main.cfg")
     # Filament and host features that overlay the extruder/probe setup.
     for name in ("belay", "btt_sfs", "runout", "extra_extruder", "host"):
         if name in features:
-            includes.extend(FEATURES[name])
+            includes.extend(path.format(board=board) for path in FEATURES[name])
     for name in ("y_frame", "eddy"):
         if name in features:
-            includes.extend(FEATURES[name])
+            includes.extend(path.format(board=board) for path in FEATURES[name])
 
     includes.append("std.macros/test_speed.cfg")
     includes.append("anchors.cfg")
@@ -294,6 +336,7 @@ def render(values: dict[str, str], checked: dict[str, object], includes: list[st
         "#",
         "# size=%d model=%s board=%s xy_step=%s"
         % (checked["size"], checked["model"], checked["board"], checked["xy_step"]),
+        "# xy_driver=%s" % checked["xy_driver"],
     ]
     if checked["toolhead"]:
         header.append("# toolhead=%s" % checked["toolhead"])
@@ -316,6 +359,7 @@ def machine_conf_text(checked: dict[str, object]) -> str:
         "model=%s" % checked["model"],
         "board=%s" % checked["board"],
         "xy_step=%s" % checked["xy_step"],
+        "xy_driver=%s" % checked["xy_driver"],
     ]
     if checked["toolhead"]:
         lines.append("toolhead=%s" % checked["toolhead"])

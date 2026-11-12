@@ -10,6 +10,104 @@ Every entry is provided in Russian and English.
 
 ## [Unreleased]
 
+### Added / Добавлено
+
+- **RU:** `scripts/update_firmware.sh` пересобирает прошивки по `machine.conf`
+  и обновляет MCU после обновления Klipper: сначала `ext-extruder` и `extruder`
+  по CAN, последней — главную плату. UUID читаются из развёрнутого
+  `std.config.local/uuids.cfg`; есть `--dry-run`, `--auto`, `--force` и защита
+  от прошивки во время печати или обновления Moonraker.
+  **EN:** `scripts/update_firmware.sh` rebuilds the firmware from
+  `machine.conf` and updates the MCUs after a Klipper update: `ext-extruder`
+  and `extruder` over CAN first, the main board last. UUIDs come from the
+  deployed `std.config.local/uuids.cfg`; `--dry-run`, `--auto`, `--force` and
+  guards for an active print or Moonraker update are included.
+
+- **RU:** Подкоманда `flash_mcu.sh bridge` для главной платы в режиме USB-CAN
+  bridge: перевод в загрузчик по CAN, загрузка через Katapult-USB или STM32
+  DFU по адресу приложения без `mass-erase`, ожидание возвращения `can0`.
+  Добавлен `--no-service` для оркестратора.
+  **EN:** New `flash_mcu.sh bridge` command for a main board running as a
+  USB-CAN bridge: bootloader request over CAN, upload through Katapult-USB or
+  STM32 DFU at the application address without `mass-erase`, then wait for
+  `can0` to return. `--no-service` was added for the orchestrator.
+
+- **RU:** Раскладка термисторов M8P V2.0 для v24: `THB` — стол, `TH0` —
+  Y-frame, `TH2`/`TH3` — драйверы TMC5160 (`TH2` через
+  `temperature_fan drivers_fan`, `TH3` через `temperature_sensor tmc5160_1`);
+  `TH1` не используется. Y-frame на v24 — NTC 10K B3950; для него добавлен
+  `std.configs/sensors/ntc10k-3950.cfg` (`sensor_type: ntc10k_3950`,
+  трёхточечный Steinhart-Hart по таблице, ошибка <0.02 °C). Встроенный
+  `Generic 3950` — 100K и для этого датчика не подходит.
+  `bed.cfg`, `sensors/y-frame.cfg` и `fans/drivers_hv_fan.cfg` заменены
+  каталогами с вариантами по плате. На тестовой 2.4 стол (THB) читается
+  25.8 °C, Y-frame (TH0, B3950) — 26.0 °C, драйверы (TH2/TH3) — 51.9–53.0 °C.
+  **EN:** M8P V2.0 thermistor map for v24: `THB` bed, `TH0` Y-frame,
+  `TH2`/`TH3` TMC5160 drivers (`TH2` through `temperature_fan drivers_fan`,
+  `TH3` through `temperature_sensor tmc5160_1`); `TH1` is unused.
+  `bed.cfg`, `sensors/y-frame.cfg` and `fans/drivers_hv_fan.cfg` became
+  per-board directories. The v24 Y-frame is an NTC 10K B3950; a dedicated
+  `std.configs/sensors/ntc10k-3950.cfg` defines `sensor_type: ntc10k_3950`
+  with a three-point Steinhart-Hart fit (within 0.02 C of the table). The
+  built-in `Generic 3950` is a 100K table and does not fit this sensor. On the
+  test 2.4 the bed (THB) reads 25.8 C, Y-frame (TH0, B3950) 26.0 C, and the
+  drivers (TH2/TH3) 51.9-53.0 C.
+
+- **RU:** Раскладка вентиляторов v24/M8P: `FAN0` — питание стола
+  (`heater_bed.heater_pin`), `FAN1` — `filter_fan`, `FAN2` — `psu_fan`,
+  `FAN3` — `board_fan` (`controller_fan`), `FAN4` — `exhaust_fan`;
+  `fans/` разделён на `manta-m5p/` и `manta-m8p/`. На тестовой 2.4
+  подтверждены пины FAN0–FAN4, Klipper выходит в `ready`.
+  **EN:** v24/M8P fan map: `FAN0` bed power (`heater_bed.heater_pin`), `FAN1`
+  `filter_fan`, `FAN2` `psu_fan`, `FAN3` `board_fan` (`controller_fan`),
+  `FAN4` `exhaust_fan`; `fans/` is split into `manta-m5p/` and `manta-m8p/`.
+  On the test 2.4 FAN0-FAN4 pins were verified and Klipper reaches `ready`.
+
+- **RU:** Ось `xy_driver`: только 150×150 использует TMC5160 +
+  17HM19-1684 (0.9°), все остальные размеры — TMC5160 +
+  LDO-42STH48-2804AC (1.8°, 55 Н·см, 2.8 А/фаза, `run_current: 1.697`).
+  Выбор по умолчанию следует за `size`; `--matrix` проверяет обе связки.
+  **EN:** New `xy_driver` axis: only 150x150 uses TMC5160 + 17HM19-1684
+  (0.9 degree); every other size uses TMC5160 + LDO-42STH48-2804AC
+  (1.8 degree, 55 Ncm, 2.8 A/phase, `run_current: 1.697`). The default follows
+  `size`, and `--matrix` covers both combinations.
+
+- **RU:** Тестовый профиль `printers/v24-350`: Voron 2.4 350×350, Manta M8P
+  V2.0 (STM32H723), SHT36 v3, SHT42 и HGX.8T; UUID взяты из CAN-шины целевой
+  машины, локальные PID/input shaper/extruder сохранены; X/Y переведены на
+  TMC5160 + LDO-42STH48-2804AC (1.8°), профиль развёрнут на 192.168.52.30.
+  **EN:** Test profile `printers/v24-350`: Voron 2.4 350×350, Manta M8P V2.0
+  (STM32H723), SHT36 v3, SHT42 and HGX.8T; UUIDs come from the target CAN bus,
+  the local PID/input shaper/extruder files are preserved, and X/Y now use
+  TMC5160 + LDO-42STH48-2804AC (1.8 degree); deployed to 192.168.52.30.
+
+- **RU:** `scripts/install_update_hook.sh` ставит systemd path- и timer-юниты:
+  обновление Klipper запускает пересборку и прошивку, неудачный или
+  отложенный запуск повторяется каждые 10 минут; установка помечает текущий
+  commit как уже прошитый.
+  **EN:** `scripts/install_update_hook.sh` installs systemd path and timer
+  units: a Klipper update triggers the rebuild and flash, a failed or deferred
+  run is retried every 10 minutes, and installation stamps the current commit
+  as already flashed.
+
+### Fixed / Исправлено
+
+- **RU:** Главная плата в режиме USB-CAN bridge больше не прошивается через
+  `can`: `can0` предоставляет она сама, и прошивка оборвала бы интерфейс.
+  Таблица в README и комментарии скриптов исправлены на `bridge`.
+  **EN:** A main board running as a USB-CAN bridge is no longer flashed over
+  `can`: the board itself provides `can0`, so the upload would cut the
+  interface. The README table and script comments now use `bridge`.
+
+- **RU:** `std.configs/boards/manta-m8p.cfg`: алиасы `BLT_SENS` и `PS_ON` были
+  выровнены не как продолжение `aliases`, из-за чего Klipper падал с
+  `Option 'blt_sens' is not valid in section 'board_pins'`. Исправлено при
+  тестовом развёртывании v24-350 на M8P V2.0.
+  **EN:** `std.configs/boards/manta-m8p.cfg`: the `BLT_SENS` and `PS_ON`
+  aliases were not indented as part of `aliases`, so Klipper failed with
+  `Option 'blt_sens' is not valid in section 'board_pins'`. Fixed during the
+  v24-350 deployment on an M8P V2.0.
+
 ## [1.3.0] - 2026-11-08
 
 ### Added / Добавлено
