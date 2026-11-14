@@ -47,6 +47,12 @@ z_leg_measured=245
 0/3/7/8/1/2`. `xy_driver` можно задать явно, но по умолчанию он выбирается по
 `size`, поэтому `--matrix` проверяет обе связки.
 
+TMC5160 X/Y в репозитории разделены по плате: M8P V2.0 использует общий
+**software SPI** на `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) с отдельным
+CS-пином на драйвер; M5P — аппаратный `spi2`. Аппаратный `spi1` на M8P V2.0
+занимает `PA7`, который в этой раскладке является `TH3` (термистор драйвера),
+поэтому одновременно `spi1` и `TH3` использовать нельзя.
+
 Термисторы M8P V2.0 в профиле v24: `THB` — стол, `TH0` — Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; встроенный `Generic 3950` —
 это 100K, для 10K-датчика не подходит),
@@ -374,6 +380,12 @@ every other size uses TMC5160 + LDO-42STH48-2804AC (1.8 degree, 55 Ncm,
 `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/8/1/2`. `xy_driver` may be set
 explicitly, but by default it follows `size`, so `--matrix` covers both
 combinations.
+
+TMC5160 X/Y configs are split by board: the M8P V2.0 uses the shared
+**software SPI** bus on `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) with a separate
+CS pin per driver; the M5P uses hardware `spi2`. Hardware `spi1` on the M8P V2.0
+reserves `PA7`, which is `TH3` (the driver thermistor) in this layout, so `spi1`
+and `TH3` cannot be used together.
 
 M8P V2.0 thermistors in the v24 profile: `THB` is the bed, `TH0` the Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; the built-in `Generic 3950` is a

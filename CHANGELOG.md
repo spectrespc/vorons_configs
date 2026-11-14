@@ -63,6 +63,17 @@ Every entry is provided in Russian and English.
   `FAN4` `exhaust_fan`; `fans/` is split into `manta-m5p/` and `manta-m8p/`.
   On the test 2.4 FAN0-FAN4 pins were verified and Klipper reaches `ready`.
 
+- **RU:** Конфигурации TMC5160 X/Y разделены по плате: M8P V2.0 использует
+  общий software SPI `PG6/PG7/PG8` с отдельным CS на драйвер, M5P — `spi2`.
+  Аппаратный `spi1` на M8P V2.0 конфликтует с `TH3` (PA7), поэтому с
+  термистором драйвера на TH3 он невозможен. На тестовой 2.4 Klipper
+  выходит в `ready` с software SPI.
+  **EN:** TMC5160 X/Y configs are now board specific: the M8P V2.0 uses the
+  shared software SPI bus `PG6/PG7/PG8` with a per-driver CS, while the M5P
+  uses `spi2`. Hardware `spi1` on the M8P V2.0 conflicts with `TH3` (PA7), so
+  it cannot be combined with the driver thermistor on TH3. The test 2.4
+  reaches `ready` with software SPI.
+
 - **RU:** Ось `xy_driver`: только 150×150 использует TMC5160 +
   17HM19-1684 (0.9°), все остальные размеры — TMC5160 +
   LDO-42STH48-2804AC (1.8°, 55 Н·см, 2.8 А/фаза, `run_current: 1.697`).

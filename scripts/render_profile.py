@@ -285,7 +285,8 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
         includes.append("std.configs/boards/%s.cfg" % checked["toolhead"])
     includes.append("std.configs/mechanics/%s.cfg" % model)
     includes.append(
-        "std.configs/mechanics/tmc/xy-%s.cfg" % checked["xy_driver"]
+        "std.configs/mechanics/tmc/%s/xy-%s.cfg"
+        % (board, checked["xy_driver"])
     )
     if board == "manta-m8p":
         # TH2/TH3 monitor the TMC5160 driver heatsinks on the M8P; the M5P
