@@ -145,6 +145,27 @@ Every entry is provided in Russian and English.
   `Option 'blt_sens' is not valid in section 'board_pins'`. Fixed during the
   v24-350 deployment on an M8P V2.0.
 
+- **RU:** `printers/v24-350/machine-extras.cfg` переопределяет раскладку Z-слотов
+  под фактическую разводку стенда: `Z0=MOTOR3`, `Z1=MOTOR4`, `Z2=MOTOR5`,
+  `Z3=MOTOR6` вместо эталонных MOTOR3/5/6/7. До этого первый `STEPPER_BUZZ` или
+  включение Z уводило принтер в shutdown с
+  `Unable to read tmc uart 'stepper_z3' register IFCNT`, потому что на `MOTOR7`
+  драйвера нет, а два оставшихся Z-драйвера обслуживали чужие моторы. Проверено
+  на железе: все четыре TMC2209 отвечают по UART (`PB9`, `PB5`, `PG14`, `PG10`),
+  `DUMP_TMC` проходит, Z0..Z2 жужжат без ошибок. Открытым остаётся дефект
+  Z3/`MOTOR6` (`OpenLoad_A` в покое, `s2vsb` при движении) — кабель или модуль
+  4-го мотора. README дополнен проверенной таблицей и порядком проверки.
+  **EN:** `printers/v24-350/machine-extras.cfg` overrides the Z slot layout to
+  match the bench wiring: `Z0=MOTOR3`, `Z1=MOTOR4`, `Z2=MOTOR5`, `Z3=MOTOR6`
+  instead of the reference MOTOR3/5/6/7. Before this, the first `STEPPER_BUZZ`
+  or Z enable shut the printer down with
+  `Unable to read tmc uart 'stepper_z3' register IFCNT`, because `MOTOR7` has no
+  driver while two further Z drivers were driving the wrong motors. Verified on
+  hardware: all four TMC2209 answer over UART (`PB9`, `PB5`, `PG14`, `PG10`),
+  `DUMP_TMC` passes, and Z0..Z2 buzz without errors. The Z3/`MOTOR6` defect
+  remains open (`OpenLoad_A` at standstill, `s2vsb` while moving): 4th motor
+  cable or driver module. README now carries the verified map and test order.
+
 ## [1.3.0] - 2026-11-08
 
 ### Added / Добавлено

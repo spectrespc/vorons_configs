@@ -53,6 +53,35 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 занимает `PA7`, который в этой раскладке является `TH3` (термистор драйвера),
 поэтому одновременно `spi1` и `TH3` использовать нельзя.
 
+### Z-драйверы M8P V2.0 и проверенная раскладка слотов
+
+Раскладка Z-слотов — свойство конкретной машины. Общий шаблон
+`mechanics/tmc/4z-tmc2209-17hs4401s.cfg` задаёт эталон
+(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`), а профиль может
+переопределить секции `[stepper_z*]` и `[tmc2209 stepper_z*]` в
+`machine-extras.cfg` (include стоит последним, поэтому значения применяются
+поверх каталога).
+
+Проверено на тестовой Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
+`v0.13.0-816`) 2026-11-15:
+
+- X/Y TMC5160 (software SPI `PG6`/`PG7`/`PG8`, CS на `PC13`/`PE3`): `G28 X`
+  и `G28 Y` проходят, регистры читаются.
+- На этом стенде Z разведены подряд: `Z0=MOTOR3`, `Z1=MOTOR4`, `Z2=MOTOR5`,
+  `Z3=MOTOR6`. Все четыре TMC2209 отвечают по UART (`PB9`, `PB5`, `PG14`,
+  `PG10`) и `DUMP_TMC` проходит; переопределение лежит в
+  `printers/v24-350/machine-extras.cfg`. `MOTOR7` при такой разводке пустой и
+  UART молчит — именно поэтому эталонная раскладка на стенде давала
+  `Unable to read tmc uart 'stepper_z3' register IFCNT` и shutdown при первом
+  включении Z.
+- `STEPPER_BUZZ` для Z0..Z2 проходит. На Z3 (`MOTOR6`) драйвер сообщает
+  `OpenLoad_A` в покое и `s2vsb` при движении: проверять кабель и разъём
+  4-го мотора, затем сам модуль драйвера. До устранения `G28 Z` и
+  `QUAD_GANTRY_LEVEL` не запускать.
+- `hold_current` для Z задавать не нужно: `configfile.settings` показывает
+  унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
+  `ihold=19 irun=19`, то есть в покое моторы держат те же 0.6 А.
+
 Ревизии M8P выбираются осью `board`: `manta-m8p` — V2.0 (STM32H723, 25 МГц,
 USB-CAN-мост), `manta-m8p-v1.0` и `manta-m8p-v1.1` — STM32G0B1, 8 МГц,
 8 КиБ загрузчик. Все три значения используют общие `fans/manta-m8p/`,
@@ -359,8 +388,11 @@ Klipper, прошивает платы, запускает Klipper и запис
   (только `flash_mcu.sh serial`/`dfu`). После обновления Klipper это ручной шаг,
   даже при установленном systemd-хуке.
 - `boards/manta-m8p.cfg` собран по эталону `Voron2_M8P-v2.0_config.cfg` и
-  проверен на тестовой 2.4 350: конфиг загружается, все MCU подключаются; на
-  целевой машине остаётся проверить датчики, драйверы и движение.
+  проверен на тестовой 2.4 350: конфиг загружается, все MCU подключаются, X/Y
+  и Z-драйверы отвечают (см. раздел «Z-драйверы M8P V2.0»). Раскладка Z-слотов
+  у машин разная и задаётся в `machine-extras.cfg` профиля; на стенде
+  v24-350 открыт дефект кабеля/модуля 4-го Z-мотора, поэтому `G28 Z` и
+  `QUAD_GANTRY_LEVEL` там пока не проходили.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -425,6 +457,34 @@ TMC5160 X/Y configs are split by board: the M8P V2.0 uses the shared
 CS pin per driver; the M5P uses hardware `spi2`. Hardware `spi1` on the M8P V2.0
 reserves `PA7`, which is `TH3` (the driver thermistor) in this layout, so `spi1`
 and `TH3` cannot be used together.
+
+### M8P V2.0 Z drivers and the verified slot layout
+
+The Z slot layout is a property of each machine. The shared
+`mechanics/tmc/4z-tmc2209-17hs4401s.cfg` module defines the reference
+(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`), and a profile may override
+the `[stepper_z*]` and `[tmc2209 stepper_z*]` sections in `machine-extras.cfg`
+(the include is last, so its values win over the catalog).
+
+Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
+`v0.13.0-816`) on 2026-11-15:
+
+- X/Y TMC5160 (software SPI `PG6`/`PG7`/`PG8`, CS on `PC13`/`PE3`): `G28 X`
+  and `G28 Y` pass and the registers read back.
+- On this harness Z is wired contiguously: `Z0=MOTOR3`, `Z1=MOTOR4`,
+  `Z2=MOTOR5`, `Z3=MOTOR6`. All four TMC2209 answer over UART (`PB9`, `PB5`,
+  `PG14`, `PG10`) and `DUMP_TMC` passes; the override lives in
+  `printers/v24-350/machine-extras.cfg`. With this wiring `MOTOR7` is empty and
+  its UART is silent, which is why the reference layout produced
+  `Unable to read tmc uart 'stepper_z3' register IFCNT` and a shutdown on the
+  first Z enable.
+- `STEPPER_BUZZ` passes for Z0..Z2. On Z3 (`MOTOR6`) the driver reports
+  `OpenLoad_A` at standstill and `s2vsb` while moving: check the 4th motor cable
+  and connector, then the driver module. Do not run `G28 Z` or
+  `QUAD_GANTRY_LEVEL` before that is fixed.
+- `hold_current` is not needed for Z: `configfile.settings` shows the inherited
+  maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
+  motors hold the same 0.6 A.
 
 M8P revisions are selected with the `board` axis: `manta-m8p` is V2.0
 (STM32H723, 25 MHz, USB-CAN bridge), while `manta-m8p-v1.0` and
@@ -731,8 +791,11 @@ recovery.
   `flash_mcu.sh serial`/`dfu`). After a Klipper update this stays a manual step
   even with the systemd hook installed.
 - `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference and
-  was tested on a 2.4 350: the config loads and every MCU connects; sensors,
-  drivers and motion still need validation on the target machine.
+  was tested on a 2.4 350: the config loads, every MCU connects, and the X/Y and
+  Z drivers answer (see "M8P V2.0 Z drivers"). Each machine has its own Z slot
+  layout, set in the profile's `machine-extras.cfg`; the v24-350 bench still has
+  an open 4th Z motor cable/module defect, so `G28 Z` and `QUAD_GANTRY_LEVEL`
+  have not passed there yet.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
