@@ -74,10 +74,12 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   UART молчит — именно поэтому эталонная раскладка на стенде давала
   `Unable to read tmc uart 'stepper_z3' register IFCNT` и shutdown при первом
   включении Z.
-- `STEPPER_BUZZ` для Z0..Z2 проходит. На Z3 (`MOTOR6`) драйвер сообщает
-  `OpenLoad_A` в покое и `s2vsb` при движении: проверять кабель и разъём
-  4-го мотора, затем сам модуль драйвера. До устранения `G28 Z` и
-  `QUAD_GANTRY_LEVEL` не запускать.
+- `STEPPER_BUZZ` для Z0..Z2 проходит. На Z3 (`MOTOR6`) драйвер сообщал
+  `OpenLoad_A` в покое и `s2vsb` при движении — дефект разъёма 4-го мотора.
+  После исправления подключения `DUMP_TMC` по всем четырём чистый (`GSTAT 0`,
+  без `ola`/`olb`/`s2vs`), а контролируемое перемещение Z на +20 и −20 мм на
+  токе 0.6 А проходит без ошибок. `G28 Z` и `QUAD_GANTRY_LEVEL` ещё не
+  прогонялись.
 - `hold_current` для Z задавать не нужно: `configfile.settings` показывает
   унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
   `ihold=19 irun=19`, то есть в покое моторы держат те же 0.6 А.
@@ -391,8 +393,9 @@ Klipper, прошивает платы, запускает Klipper и запис
   проверен на тестовой 2.4 350: конфиг загружается, все MCU подключаются, X/Y
   и Z-драйверы отвечают (см. раздел «Z-драйверы M8P V2.0»). Раскладка Z-слотов
   у машин разная и задаётся в `machine-extras.cfg` профиля; на стенде
-  v24-350 открыт дефект кабеля/модуля 4-го Z-мотора, поэтому `G28 Z` и
-  `QUAD_GANTRY_LEVEL` там пока не проходили.
+  v24-350 дефект разъёма 4-го Z-мотора устранён: `DUMP_TMC` по всем четырём
+  чистый, перемещение Z на ±20 мм на 0.6 А проходит; `G28 Z` и
+  `QUAD_GANTRY_LEVEL` там пока не прогонялись.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -478,10 +481,12 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
   its UART is silent, which is why the reference layout produced
   `Unable to read tmc uart 'stepper_z3' register IFCNT` and a shutdown on the
   first Z enable.
-- `STEPPER_BUZZ` passes for Z0..Z2. On Z3 (`MOTOR6`) the driver reports
-  `OpenLoad_A` at standstill and `s2vsb` while moving: check the 4th motor cable
-  and connector, then the driver module. Do not run `G28 Z` or
-  `QUAD_GANTRY_LEVEL` before that is fixed.
+- `STEPPER_BUZZ` passes for Z0..Z2. On Z3 (`MOTOR6`) the driver used to report
+  `OpenLoad_A` at standstill and `s2vsb` while moving, which turned out to be a
+  bad connector on the 4th motor. After the connector was fixed `DUMP_TMC` is
+  clean on all four (`GSTAT 0`, no `ola`/`olb`/`s2vs`), and a controlled Z move
+  of +20 and −20 mm at 0.6 A completes without errors. `G28 Z` and
+  `QUAD_GANTRY_LEVEL` have not been run yet.
 - `hold_current` is not needed for Z: `configfile.settings` shows the inherited
   maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
   motors hold the same 0.6 A.
@@ -793,9 +798,10 @@ recovery.
 - `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference and
   was tested on a 2.4 350: the config loads, every MCU connects, and the X/Y and
   Z drivers answer (see "M8P V2.0 Z drivers"). Each machine has its own Z slot
-  layout, set in the profile's `machine-extras.cfg`; the v24-350 bench still has
-  an open 4th Z motor cable/module defect, so `G28 Z` and `QUAD_GANTRY_LEVEL`
-  have not passed there yet.
+  layout, set in the profile's `machine-extras.cfg`; on the v24-350 bench the
+  4th Z motor connector defect is fixed (`DUMP_TMC` clean on all four, a ±20 mm
+  Z move at 0.6 A passes), while `G28 Z` and `QUAD_GANTRY_LEVEL` have not been
+  run there yet.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
