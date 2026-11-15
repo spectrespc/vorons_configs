@@ -127,6 +127,33 @@ Every entry is provided in Russian and English.
   run is retried every 10 minutes, and installation stamps the current commit
   as already flashed.
 
+### Changed / Изменено
+
+- **RU:** Стенд `printers/v24-350`: направления всех четырёх Z-моторов
+  инвертированы в `machine-extras.cfg` (`Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`,
+  `Z3=DIR_5`) — при разводке MOTOR3..MOTOR6 стенду нужна обратная полярность.
+  Инвертированы сразу все четыре, поэтому относительная картина знаков
+  зеркальных углов и поведение `QUAD_GANTRY_LEVEL` по наклону не меняются,
+  меняется только абсолютное «вверх/вниз». В `anchors.cfg` добавлен
+  `[safe_z_home]` с `home_xy_position: 175, 175` (центр стола 350×350) и
+  параметрами по образцу trident-150 (`speed: 50.0`, `z_hop: 15`,
+  `z_hop_speed: 15.0`): `G28 Z` и Z=0 теперь в центре стола. Проверено офлайн
+  (`--check` и `check_config.py`); на железе ожидает прогона `G28 Z` и
+  `QUAD_GANTRY_LEVEL`, а `z_offset` из общего `probe.cfg` унаследован от
+  voron-t и требует перекалибровки на стенде.
+  **EN:** Bench `printers/v24-350`: all four Z motor directions are inverted in
+  `machine-extras.cfg` (`Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`, `Z3=DIR_5`)
+  because the bench needs the opposite polarity with this MOTOR3..MOTOR6
+  wiring. All four are flipped together, so the relative sign pattern of the
+  mirror-mounted corners and the `QUAD_GANTRY_LEVEL` tilt behaviour are
+  unchanged; only the absolute up/down direction flips. `anchors.cfg` gains a
+  `[safe_z_home]` block with `home_xy_position: 175, 175` (bed centre of the
+  350x350 bed) and trident-150 values (`speed: 50.0`, `z_hop: 15`,
+  `z_hop_speed: 15.0`), so `G28 Z` and Z=0 now happen at the bed centre.
+  Verified offline (`--check` and `check_config.py`); on hardware it awaits a
+  `G28 Z` and `QUAD_GANTRY_LEVEL` run, and the `z_offset` inherited from the
+  shared `probe.cfg` comes from voron-t and needs recalibration on the bench.
+
 ### Fixed / Исправлено
 
 - **RU:** Главная плата в режиме USB-CAN bridge больше не прошивается через

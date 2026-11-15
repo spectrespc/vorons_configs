@@ -78,8 +78,16 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   `OpenLoad_A` в покое и `s2vsb` при движении — дефект разъёма 4-го мотора.
   После исправления подключения `DUMP_TMC` по всем четырём чистый (`GSTAT 0`,
   без `ola`/`olb`/`s2vs`), а контролируемое перемещение Z на +20 и −20 мм на
-  токе 0.6 А проходит без ошибок. `G28 Z` и `QUAD_GANTRY_LEVEL` ещё не
-  прогонялись.
+  токе 0.6 А проходит без ошибок.
+- Направления Z инвертированы 2026-11-15 в `machine-extras.cfg`:
+  `Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`, `Z3=DIR_5`. Перевёрнуты сразу все
+  четыре мотора, поэтому относительные знаки зеркальных углов и поведение
+  `QUAD_GANTRY_LEVEL` по наклону не меняются, меняется только абсолютное
+  «вверх/вниз». `G28 Z` и `QUAD_GANTRY_LEVEL` ещё предстоит прогнать.
+- Парковка и Z=0 — в центре стола: `[safe_z_home]` с
+  `home_xy_position: 175, 175` в `anchors.cfg`, параметры по образцу
+  trident-150 (`speed: 50.0`, `z_hop: 15`, `z_hop_speed: 15.0`).
+  Якоря `quad_gantry_level` и реальные лимиты ещё не замерены.
 - `hold_current` для Z задавать не нужно: `configfile.settings` показывает
   унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
   `ihold=19 irun=19`, то есть в покое моторы держат те же 0.6 А.
@@ -394,8 +402,11 @@ Klipper, прошивает платы, запускает Klipper и запис
   и Z-драйверы отвечают (см. раздел «Z-драйверы M8P V2.0»). Раскладка Z-слотов
   у машин разная и задаётся в `machine-extras.cfg` профиля; на стенде
   v24-350 дефект разъёма 4-го Z-мотора устранён: `DUMP_TMC` по всем четырём
-  чистый, перемещение Z на ±20 мм на 0.6 А проходит; `G28 Z` и
-  `QUAD_GANTRY_LEVEL` там пока не прогонялись.
+  чистый, перемещение Z на ±20 мм на 0.6 А проходит. Направления Z
+  инвертированы 2026-11-15, точка парковки и Z=0 — центр стола 175,175;
+  `G28 Z` и `QUAD_GANTRY_LEVEL` там пока не прогонялись, якоря QGL и реальные
+  лимиты не замерены. `z_offset` в общем `probe.cfg` (`-0.400`) снят на
+  voron-t и на стенде требует перекалибровки до первой печати.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -485,8 +496,16 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
   `OpenLoad_A` at standstill and `s2vsb` while moving, which turned out to be a
   bad connector on the 4th motor. After the connector was fixed `DUMP_TMC` is
   clean on all four (`GSTAT 0`, no `ola`/`olb`/`s2vs`), and a controlled Z move
-  of +20 and −20 mm at 0.6 A completes without errors. `G28 Z` and
-  `QUAD_GANTRY_LEVEL` have not been run yet.
+  of +20 and −20 mm at 0.6 A completes without errors.
+- The Z directions were inverted on 2026-11-15 in `machine-extras.cfg`:
+  `Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`, `Z3=DIR_5`. All four motors are
+  flipped together, so the relative signs of the mirror-mounted corners and the
+  `QUAD_GANTRY_LEVEL` tilt behaviour are unchanged; only the absolute up/down
+  direction flips. `G28 Z` and `QUAD_GANTRY_LEVEL` still need a run.
+- Parking and Z=0 are at the bed centre: `[safe_z_home]` with
+  `home_xy_position: 175, 175` in `anchors.cfg`, using the trident-150 values
+  (`speed: 50.0`, `z_hop: 15`, `z_hop_speed: 15.0`). The `quad_gantry_level`
+  anchors and the real limits are not measured yet.
 - `hold_current` is not needed for Z: `configfile.settings` shows the inherited
   maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
   motors hold the same 0.6 A.
@@ -800,8 +819,12 @@ recovery.
   Z drivers answer (see "M8P V2.0 Z drivers"). Each machine has its own Z slot
   layout, set in the profile's `machine-extras.cfg`; on the v24-350 bench the
   4th Z motor connector defect is fixed (`DUMP_TMC` clean on all four, a ±20 mm
-  Z move at 0.6 A passes), while `G28 Z` and `QUAD_GANTRY_LEVEL` have not been
-  run there yet.
+  Z move at 0.6 A passes). The Z directions were inverted on 2026-11-15 and the
+  parking point / Z=0 is the bed centre 175,175; `G28 Z` and
+  `QUAD_GANTRY_LEVEL` have not been run there yet, and the QGL anchors and real
+  limits are not measured. The `z_offset` in the shared `probe.cfg` (`-0.400`)
+  comes from voron-t and needs recalibration on the bench before the first
+  print.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
