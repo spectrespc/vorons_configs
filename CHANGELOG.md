@@ -129,6 +129,23 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** `mechanics/v24.cfg`: `rotation_distance` осей X и Y исправлен с `32`
+  на `40` — у v24 на X/Y стоят шкивы GT2 20T (20 · 2 мм = 40 мм на оборот), а
+  не 16T. С `32` любое перемещение выполнялось на 25 % больше заказанного
+  (100 мм по команде давали ~125 мм по факту), что ломает и парковку, и
+  размеры печати. Проверено офлайн (`--check`, `check_config.py`), на стенде
+  подтверждается `configfile.settings.stepper_x/y.rotation_distance = 40.0`;
+  контрольное перемещение с линейкой — за оператором. `mechanics/trident.cfg`
+  не менялся.
+  **EN:** `mechanics/v24.cfg`: the X and Y `rotation_distance` is corrected from
+  `32` to `40` — the v24 uses GT2 20T pulleys on X/Y (20 * 2 mm = 40 mm per
+  revolution), not 16T. With `32` every move travelled 25% further than
+  commanded (100 mm requested gave ~125 mm actual), which breaks both homing
+  and print dimensions. Verified offline (`--check`, `check_config.py`) and
+  confirmed on the bench by
+  `configfile.settings.stepper_x/y.rotation_distance = 40.0`; the ruler check
+  of a test move is left to the operator. `mechanics/trident.cfg` is unchanged.
+
 - **RU:** Вход `[probe]` у всей семьи Manta M8P перенесён на `SENS_2`
   (M3-STOP, разъём с маркировкой «Z stop»): `pin: !SENS_2` в
   `boards/manta-m8p.cfg` (раскрывается в `PF2`) и в
