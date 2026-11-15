@@ -7,6 +7,10 @@ out/
 .backup/
 .kilo/
 
+# Secrets (passwords for the printer fleet); only *.example templates are tracked
+secrets/*
+!secrets/hosts.env.example
+
 # Python
 __pycache__/
 *.pyc

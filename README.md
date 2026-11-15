@@ -461,6 +461,64 @@ Klipper, прошивает платы, запускает Klipper и запис
 - Репозиторий приватный; `local/` (UUID, PID, input shaper) коммитится осознанно.
 - `KlipperScreen.conf` содержит автогенерируемый блок `#~#`, поэтому он seed.
 
+### Доступ к хостам парка
+
+- Пароли хостов лежат только локально: `secrets/hosts.env` (каталог в
+  `.gitignore`, файл `chmod 600`). В репозитории — шаблон
+  `secrets/hosts.env.example` без значений.
+- Стенд v24-350: `V24_350_HOST=192.168.52.30`, `V24_350_SSH_USER`,
+  `V24_350_SSH_PASS`. Вход — по SSH-ключу (`ssh-copy-id` один раз, пароль
+  нужен только для установки ключа и для `sudo`).
+- Пароль не должен попадать в argv и в историю: передавайте его через
+  переменную окружения (`sshpass -e` с `SSHPASS`) либо pty-обёрткой, которая
+  сама читает `secrets/hosts.env`; `sshpass` в системе может отсутствовать, и
+  тогда обёртка — единственный вариант.
+- Проверка утечки после коммитов: `git status --short` не показывает
+  `secrets/` (кроме `hosts.env.example`), а поиск по истории
+  (`git log -p`) не находит пароль.
+
+### Известные патчи Klipper и настройка CAN-хоста
+
+Конфиги репозитория этих правок не содержат — они применяются на самом хосте
+принтера. Стенд v24-350 работает на Klipper `v0.13.0-816` и нуждается в обоих
+пунктах.
+
+1. **trsync (upstream `29d4ec2`, 2026-11-11).** Без фикса при парковке и
+   зондировании возможен `MCU 'mcu' shutdown: Timer too close`: знаковое
+   сравнение `(int64_t)(expire - m->expire_clock) >= m->min_extend_ticks`
+   может отправить MCU `trsync_set_timeout` с уже прошедшим clock.
+
+   ```bash
+   git -C ~/klipper cherry-pick --no-commit 29d4ec2d6d840ee839333306003a400da186d41d
+   sudo systemctl restart klipper      # chelper пересобирается при старте
+   ```
+
+   Признаки применения: в свежем `klippy.log` есть
+   `Building C code module c_helper.so` и строка
+   `Modified files: klippy/chelper/trdispatch.c`. MCU перепрошивать не нужно.
+   После обновления Klipper до master, где фикс уже есть, правку снимают:
+   `git -C ~/klipper checkout -- klippy/chelper/trdispatch.c` (если она была
+   закоммичена локально — `git revert`). Перед обновлением Klipper полезно
+   проверить, что фикс на месте: `git -C ~/klipper log --oneline -1 --grep=trsync`
+   или `grep -n "expire >= m->expire_clock" klippy/chelper/trdispatch.c`.
+
+2. **Глубина TX-очереди `can0`.** `ifup@can0` должен поднимать
+   `txqueuelen 1024`: при штатных 10 кадрах Klipper пишет
+   `Got error -1 in can write: (105)No buffer space available`, кадры
+   `trsync_set_timeout` теряются и MCU уходит в `Timer too close`. В образе
+   CB2 нет `ifconfig` (net-tools не установлен), поэтому в
+   `/etc/network/interfaces` нужен `ip`, иначе `ifup@can0` падает с кодом 1:
+
+   ```
+   iface can0 can static
+       bitrate 1000000
+       up ip link set dev can0 txqueuelen 1024
+   ```
+
+   Проверка: `ip -details link show can0` показывает `qlen 1024`,
+   `systemctl status ifup@can0` — без `status=1/FAILURE`, в `klippy.log` нет
+   новых `No buffer space available`.
+
 ### Известные ограничения
 
 - `boards/manta-m8p-v1.0.cfg` и `boards/manta-m8p-v1.1.cfg` собраны по эталонам
@@ -961,6 +1019,64 @@ recovery.
   placeholder.
 - The repository is private; `local/` (UUIDs, PID, input shaper) is committed deliberately.
 - `KlipperScreen.conf` contains a generated `#~#` block, which is why it is a seed file.
+
+### Fleet host access
+
+- Host passwords are stored locally only: `secrets/hosts.env` (the directory is
+  gitignored, the file is `chmod 600`). The repository carries the
+  `secrets/hosts.env.example` template without values.
+- v24-350 bench: `V24_350_HOST=192.168.52.30`, `V24_350_SSH_USER`,
+  `V24_350_SSH_PASS`. Login uses an SSH key (`ssh-copy-id` once); the password
+  is only needed to install the key and for `sudo`.
+- The password must never enter argv or shell history: pass it through the
+  environment (`sshpass -e` with `SSHPASS`) or a pty wrapper that reads
+  `secrets/hosts.env` itself. `sshpass` may be missing on the machine, in which
+  case the wrapper is the only option.
+- Leak check after commits: `git status --short` does not list `secrets/`
+  (except `hosts.env.example`), and a history search (`git log -p`) does not
+  find the password.
+
+### Known Klipper patches and CAN host setup
+
+These changes are not part of the config repository; they are applied on the
+printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both.
+
+1. **trsync (upstream `29d4ec2`, 2026-11-11).** Without the fix, homing and
+   probing can end in `MCU 'mcu' shutdown: Timer too close`: the signed
+   `(int64_t)(expire - m->expire_clock) >= m->min_extend_ticks` comparison can
+   send the MCU a `trsync_set_timeout` whose clock has already passed.
+
+   ```bash
+   git -C ~/klipper cherry-pick --no-commit 29d4ec2d6d840ee839333306003a400da186d41d
+   sudo systemctl restart klipper      # chelper rebuilds on start
+   ```
+
+   Signs that it is applied: the fresh `klippy.log` shows
+   `Building C code module c_helper.so` and
+   `Modified files: klippy/chelper/trdispatch.c`. No MCU reflash is needed.
+   After updating Klipper to a master that contains the fix, remove the local
+   change with `git -C ~/klipper checkout -- klippy/chelper/trdispatch.c` (or
+   `git revert` if it was committed). Before updating Klipper, check that the
+   fix is still there: `git -C ~/klipper log --oneline -1 --grep=trsync` or
+   `grep -n "expire >= m->expire_clock" klippy/chelper/trdispatch.c`.
+
+2. **`can0` TX queue depth.** `ifup@can0` must raise `txqueuelen 1024`: with
+   the default 10 frames Klipper logs
+   `Got error -1 in can write: (105)No buffer space available`, loses
+   `trsync_set_timeout` frames and the MCU goes to `Timer too close`. The CB2
+   image has no `ifconfig` (net-tools is not installed), so
+   `/etc/network/interfaces` must use `ip`, otherwise `ifup@can0` fails with
+   exit code 1:
+
+   ```
+   iface can0 can static
+       bitrate 1000000
+       up ip link set dev can0 txqueuelen 1024
+   ```
+
+   Check: `ip -details link show can0` reports `qlen 1024`,
+   `systemctl status ifup@can0` has no `status=1/FAILURE`, and `klippy.log`
+   gains no new `No buffer space available` lines.
 
 ### Known limitations
 
