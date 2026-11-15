@@ -129,6 +129,31 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Вход `[probe]` у всей семьи Manta M8P перенесён на `SENS_2`
+  (M3-STOP, разъём с маркировкой «Z stop»): `pin: !SENS_2` в
+  `boards/manta-m8p.cfg` (раскрывается в `PF2`) и в
+  `boards/manta-m8p-v1.0.cfg`/`-v1.1.cfg` (`PF5`). Это совпадает с
+  конвенцией `boards/manta-m5p.cfg` и освобождает референсные входы
+  M4-STOP/PF1 (V2.0) и M4-STOP/PC0 (V1.x). Комментарии о раскладке
+  драйверов и о перемычке NPN/PNP обновлены; `mechanics/v24.cfg`
+  (`endstop_pin: probe:z_virtual_endstop`) не менялся. Проверено офлайн
+  (`deploy_configs.sh --check`, `check_config.py --machine` и
+  `--stale-check`: `profile.cfg` не перерисовывался); на стенде
+  подтверждается `QUERY_PROBE`, физические прогоны `PROBE`/`G28 Z`/`QGL`
+  ещё впереди.
+  **EN:** The `[probe]` input of the whole Manta M8P family moved to `SENS_2`
+  (M3-STOP, the connector labelled "Z stop"): `pin: !SENS_2` in
+  `boards/manta-m8p.cfg` (resolves to `PF2`) and in
+  `boards/manta-m8p-v1.0.cfg`/`-v1.1.cfg` (`PF5`). This matches the
+  `boards/manta-m5p.cfg` convention and frees the reference M4-STOP/PF1
+  (V2.0) and M4-STOP/PC0 (V1.x) inputs. The driver-map and NPN/PNP jumper
+  comments were updated; `mechanics/v24.cfg`
+  (`endstop_pin: probe:z_virtual_endstop`) is unchanged. Verified offline
+  (`deploy_configs.sh --check`, `check_config.py --machine` and
+  `--stale-check`: `profile.cfg` was not re-rendered); on the bench it is
+  confirmed by `QUERY_PROBE`, while the physical `PROBE`/`G28 Z`/`QGL` runs
+  are still pending.
+
 - **RU:** Стенд `printers/v24-350`: направления всех четырёх Z-моторов
   инвертированы в `machine-extras.cfg` (`Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`,
   `Z3=DIR_5`) — при разводке MOTOR3..MOTOR6 стенду нужна обратная полярность.

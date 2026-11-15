@@ -391,8 +391,8 @@ Klipper, прошивает платы, запускает Klipper и запис
   Voron (`Voron2_M8P-v1.0/1.1_config.cfg`) и Klipper
   (`generic-bigtreetech-manta-m8p-v1.0/1.1.cfg`) и проверены офлайн (`--check`
   и сборка обеих прошивок); на железе они не проверялись. Перед вводом машины
-  проверить направления DIR, перемычку NPN/PNP входа probe (`PC0`) и то, что
-  дисплей живёт на software SPI.
+  проверить направления DIR, перемычку NPN/PNP входа probe (`PF5`, M3-STOP /
+  SENS_2) и то, что дисплей живёт на software SPI.
 - v1.0 без CAN-трансивера: toolhead и extra extruder на CAN требуют внешнего
   USB-CAN-адаптера, а главная плата никогда не прошивается автоматически
   (только `flash_mcu.sh serial`/`dfu`). После обновления Klipper это ручной шаг,
@@ -407,6 +407,11 @@ Klipper, прошивает платы, запускает Klipper и запис
   `G28 Z` и `QUAD_GANTRY_LEVEL` там пока не прогонялись, якоря QGL и реальные
   лимиты не замерены. `z_offset` в общем `probe.cfg` (`-0.400`) снят на
   voron-t и на стенде требует перекалибровки до первой печати.
+  Вход probe у всей семьи M8P перенесён на `SENS_2` (M3-STOP, разъём с
+  маркировкой «Z stop»): `PF2` у V2.0, `PF5` у V1.x; референсные M4-STOP/PF1
+  (V2.0) и PC0 (V1.x) свободны. На стенде зонд должен быть переставлен на
+  M3-STOP — если проводка осталась в M4-STOP, `QUERY_PROBE` не увидит
+  срабатывание, а `G28 Z` уедет в стол.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -809,7 +814,8 @@ recovery.
   (`generic-bigtreetech-manta-m8p-v1.0/1.1.cfg`) references and were verified
   offline (`--check` plus both firmware builds); they have not been tested on
   hardware. Before commissioning, check the DIR directions, the NPN/PNP jumper
-  of the probe input (`PC0`) and that the display works on software SPI.
+  of the probe input (`PF5`, M3-STOP / SENS_2) and that the display works on
+  software SPI.
 - V1.0 has no CAN transceiver: CAN toolhead and extra extruder need an external
   USB-CAN adapter, and the main board is never flashed automatically (only
   `flash_mcu.sh serial`/`dfu`). After a Klipper update this stays a manual step
@@ -824,7 +830,11 @@ recovery.
   `QUAD_GANTRY_LEVEL` have not been run there yet, and the QGL anchors and real
   limits are not measured. The `z_offset` in the shared `probe.cfg` (`-0.400`)
   comes from voron-t and needs recalibration on the bench before the first
-  print.
+  print. The probe input of the whole M8P family moved to `SENS_2` (M3-STOP,
+  the connector labelled "Z stop"): `PF2` on V2.0, `PF5` on V1.x; the reference
+  M4-STOP/PF1 (V2.0) and PC0 (V1.x) inputs stay free. On the bench the probe
+  must be rewired to M3-STOP — if it is still in M4-STOP, `QUERY_PROBE` will
+  not see a trigger and `G28 Z` will drive into the bed.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
