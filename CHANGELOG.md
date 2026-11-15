@@ -138,7 +138,7 @@ Every entry is provided in Russian and English.
   проверку пропускают. Удалён нерабочий `[homing_override]` с `G1 Z30` и
   ссылками на несуществующие макро `PARK` (подъём 30 мм теперь делает
   `[safe_z_home]`); обёртки переименовывают команды на `klippy:connect`, так что
-  `G28.1` идёт через `[safe_z_home]`, а `QUAD_GANTRY_LEVEL.1` — через
+  `G28.1` идёт через `[safe_z_home]`, а `QUAD_GANTRY_LEVEL_BASE` — через
   `[quad_gantry_level]`. `scripts/render_profile.py` добавляет include для
   модели v24 (после `anchors.cfg`/`machine-extras.cfg`), `printers/v24-350/profile.cfg`
   перерендерен. `BED_MESH_CALIBRATE` намеренно не обёрнут. Проверено офлайн
@@ -154,7 +154,7 @@ Every entry is provided in Russian and English.
   `[homing_override]` with `G1 Z30` and references to the nonexistent `PARK`
   macro is gone (the 30 mm lift now comes from `[safe_z_home]`); the wrappers
   rename commands on `klippy:connect`, so `G28.1` goes through `[safe_z_home]`
-  and `QUAD_GANTRY_LEVEL.1` through `[quad_gantry_level]`.
+  and `QUAD_GANTRY_LEVEL_BASE` through `[quad_gantry_level]`.
   `scripts/render_profile.py` adds the include for the v24 model (after
   `anchors.cfg`/`machine-extras.cfg`) and `printers/v24-350/profile.cfg` is
   re-rendered. `BED_MESH_CALIBRATE` is deliberately not wrapped. Verified

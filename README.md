@@ -106,7 +106,7 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 намеренно не обёрнут — сетка снимается на рабочей температуре. Модуль
 подключается в `profile.cfg` для модели v24; обёртки переименовывают команды на
 `klippy:connect`, поэтому `G28.1` по-прежнему идёт через `[safe_z_home]`
-(подъём 30 мм, зонд в центре стола), а `QUAD_GANTRY_LEVEL.1` — через модуль
+(подъём 30 мм, зонд в центре стола), а `QUAD_GANTRY_LEVEL_BASE` — через модуль
 `[quad_gantry_level]`.
 
 Ревизии M8P выбираются осью `board`: `manta-m8p` — V2.0 (STM32H723, 25 МГц,
@@ -547,7 +547,7 @@ not delayed. `BED_MESH_CALIBRATE` is deliberately not wrapped — a mesh is take
 at print temperature. The module is included by `profile.cfg` for the v24
 model; the wrappers rename the commands on `klippy:connect`, so `G28.1` still
 goes through `[safe_z_home]` (30 mm lift, probe at the bed centre) and
-`QUAD_GANTRY_LEVEL.1` through the `[quad_gantry_level]` module.
+`QUAD_GANTRY_LEVEL_BASE` through the `[quad_gantry_level]` module.
 
 M8P revisions are selected with the `board` axis: `manta-m8p` is V2.0
 (STM32H723, 25 MHz, USB-CAN bridge), while `manta-m8p-v1.0` and
