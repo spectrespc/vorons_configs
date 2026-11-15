@@ -38,7 +38,39 @@ BOARDS = ("manta-m5p", "manta-m8p", "manta-m8p-v1.0", "manta-m8p-v1.1")
 # and the display bus differ.  Modules are named after this family.
 BOARD_FAMILIES = ("manta-m5p", "manta-m8p")
 XY_STEPS = ("0.9", "1.8")
-XY_DRIVERS = ("tmc5160-17HM19-1684", "tmc5160-LDO-42STH48-2804AC")
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _discover_xy_drivers() -> tuple[str, ...]:
+    """Names that have a module in every board family directory.
+
+    scripts/tmc_calc.py --write creates ``std.configs/mechanics/tmc/<board>/xy-<name>.cfg``;
+    a name is a valid ``xy_driver`` value once it exists for every family, so a
+    new motor module only needs to be written twice (m5p and m8p) to be wireable.
+    """
+    base = os.path.join(REPO_ROOT, "std.configs", "mechanics", "tmc")
+    try:
+        families = sorted(
+            name for name in os.listdir(base) if os.path.isdir(os.path.join(base, name))
+        )
+    except OSError:
+        return ()
+    found: set[str] | None = None
+    for family in families:
+        names = {
+            item[3:-4]
+            for item in os.listdir(os.path.join(base, family))
+            if item.startswith("xy-") and item.endswith(".cfg")
+        }
+        found = names if found is None else found & names
+    return tuple(sorted(found or ()))
+
+
+XY_DRIVERS = _discover_xy_drivers() or (
+    "tmc5160-17HM19-1684",
+    "tmc5160-LDO-42STH48-2804AC",
+)
 
 DEFAULT_BOARD = {"trident": "manta-m5p", "v24": "manta-m8p"}
 # Fleet rule: only the 150 mm machine uses the 0.9 degree motors.  All other
@@ -96,9 +128,6 @@ KNOWN_KEYS = {
 }
 
 REQUIRED_KEYS = ("size", "model")
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 
 class ProfileError(Exception):
     pass
