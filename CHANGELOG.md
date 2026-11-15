@@ -397,7 +397,11 @@ Every entry is provided in Russian and English.
      отправить MCU `trsync_set_timeout` с уже прошедшим clock. Фикс применён
      на стенде и на voron-t через `git cherry-pick --no-commit 29d4ec2`
      (в дереве файл помечен как modified, chelper пересобирается при старте
-     Klipper, MCU перепрошивать не нужно).
+     Klipper, MCU перепрошивать не нужно). Пока правка лежит в индексе,
+     репозиторий Klipper считается изменённым и Moonraker отказывает в
+     обновлении (`Update aborted, repo has been modified`), поэтому перед
+     обновлением правку снимают через `git restore --staged --worktree`
+     (порядок — в README).
   2. Хост CAN: `/etc/network/interfaces` поднимал `txqueuelen 1024` командой
      `ifconfig`, которой в системе нет (net-tools не установлен). Из-за этого
      `ifup@can0` падал с кодом 1, а TX-очередь оставалась 10 кадров; за день
@@ -422,7 +426,11 @@ Every entry is provided in Russian and English.
      MCU a `trsync_set_timeout` whose clock had already passed. The fix was
      applied on the bench and on voron-t with
      `git cherry-pick --no-commit 29d4ec2` (the file shows as modified, chelper
-     rebuilds on the next Klipper start, no MCU reflash needed).
+     rebuilds on the next Klipper start, no MCU reflash needed). While the
+     change sits in the index the Klipper repository counts as modified and
+     Moonraker refuses to update it (`Update aborted, repo has been modified`),
+     so the change is dropped with `git restore --staged --worktree` before an
+     update (the order is in the README).
   2. CAN host: `/etc/network/interfaces` raised `txqueuelen 1024` through
      `ifconfig`, which does not exist here (net-tools is not installed). As a
      result `ifup@can0` failed with exit code 1 and the TX queue stayed at

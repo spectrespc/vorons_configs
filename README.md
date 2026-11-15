@@ -280,7 +280,10 @@ git commit -m "Tune voron-t" && git push
 `profile.cfg` и валидирует профиль. В интерактивном терминале он спрашивает
 список фич (или принимает `--features`); `belay`/`btt_sfs` без
 `extra_extruder` отклоняются. Дальше нужно заполнить `local/uuids.cfg` и
-измеренные якоря.
+измеренные якоря. Перед первой калибровкой проверить хост CAN:
+`ip -details link show can0` должен показывать `qlen 1024`, а
+`systemctl status ifup@can0` — не `status=1/FAILURE` (см. «Известные патчи
+Klipper и настройка CAN-хоста»).
 
 ### Скрипты
 
@@ -465,7 +468,10 @@ Klipper, прошивает платы, запускает Klipper и запис
 
 - Пароли хостов лежат только локально: `secrets/hosts.env` (каталог в
   `.gitignore`, файл `chmod 600`). В репозитории — шаблон
-  `secrets/hosts.env.example` без значений.
+  `secrets/hosts.env.example` без значений. Значения пишутся в двойных
+  кавычках: файл подключается через `set -a; . secrets/hosts.env`, и без
+  кавычек пароль с `$`, обратной кавычкой, `#`, `!` или пробелом оболочка
+  раскроет или обрежет.
 - Стенд v24-350: `V24_350_HOST=192.168.52.30`, `V24_350_SSH_USER`,
   `V24_350_SSH_PASS`. Вход — по SSH-ключу (`ssh-copy-id` один раз, пароль
   нужен только для установки ключа и для `sudo`).
@@ -496,11 +502,24 @@ Klipper, прошивает платы, запускает Klipper и запис
    Признаки применения: в свежем `klippy.log` есть
    `Building C code module c_helper.so` и строка
    `Modified files: klippy/chelper/trdispatch.c`. MCU перепрошивать не нужно.
-   После обновления Klipper до master, где фикс уже есть, правку снимают:
-   `git -C ~/klipper checkout -- klippy/chelper/trdispatch.c` (если она была
-   закоммичена локально — `git revert`). Перед обновлением Klipper полезно
-   проверить, что фикс на месте: `git -C ~/klipper log --oneline -1 --grep=trsync`
-   или `grep -n "expire >= m->expire_clock" klippy/chelper/trdispatch.c`.
+
+   Важно: `cherry-pick --no-commit` оставляет правку в индексе, поэтому
+   репозиторий Klipper считается изменённым (`git describe --dirty` даёт
+   `-dirty`), и Moonraker отказывает в обновлении с
+   `Update aborted, repo has been modified`. Порядок обновления Klipper:
+
+   ```bash
+   # 1. снять локальную правку; `checkout --` здесь НЕ работает — он вернёт
+   #    версию из индекса, то есть тот же патч
+   git -C ~/klipper restore --staged --worktree klippy/chelper/trdispatch.c
+   # 2. обновить Klipper (Moonraker/Mainsail или git -C ~/klipper pull)
+   # 3. проверить, что фикс пришёл с upstream
+   grep -n "expire >= m->expire_clock" ~/klipper/klippy/chelper/trdispatch.c
+   # 4. если строки нет (master ещё без фикса) — повторить cherry-pick
+   ```
+
+   Если правка была закоммичена локально, вместо шага 1 — `git revert`
+   соответствующего коммита.
 
 2. **Глубина TX-очереди `can0`.** `ifup@can0` должен поднимать
    `txqueuelen 1024`: при штатных 10 кадрах Klipper пишет
@@ -840,7 +859,10 @@ The wizard creates `machine.conf`, a seed `printer.cfg`, a TODO `anchors.cfg`,
 `profile.cfg` and validates the profile. On an interactive terminal it asks for
 the feature list (or accepts `--features`); `belay`/`btt_sfs` without
 `extra_extruder` are rejected. Next, fill `local/uuids.cfg` and the measured
-anchors.
+anchors. Before the first calibration, check the CAN host:
+`ip -details link show can0` must report `qlen 1024`, and
+`systemctl status ifup@can0` must not show `status=1/FAILURE` (see "Known
+Klipper patches and CAN host setup").
 
 ### Scripts
 
@@ -1027,7 +1049,10 @@ recovery.
 
 - Host passwords are stored locally only: `secrets/hosts.env` (the directory is
   gitignored, the file is `chmod 600`). The repository carries the
-  `secrets/hosts.env.example` template without values.
+  `secrets/hosts.env.example` template without values. Values must be
+  double-quoted: the file is loaded with `set -a; . secrets/hosts.env`, so an
+  unquoted password containing `$`, a backtick, `#`, `!` or a space would be
+  expanded or truncated by the shell.
 - v24-350 bench: `V24_350_HOST=192.168.52.30`, `V24_350_SSH_USER`,
   `V24_350_SSH_PASS`. Login uses an SSH key (`ssh-copy-id` once); the password
   is only needed to install the key and for `sudo`.
@@ -1057,11 +1082,23 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
    Signs that it is applied: the fresh `klippy.log` shows
    `Building C code module c_helper.so` and
    `Modified files: klippy/chelper/trdispatch.c`. No MCU reflash is needed.
-   After updating Klipper to a master that contains the fix, remove the local
-   change with `git -C ~/klipper checkout -- klippy/chelper/trdispatch.c` (or
-   `git revert` if it was committed). Before updating Klipper, check that the
-   fix is still there: `git -C ~/klipper log --oneline -1 --grep=trsync` or
-   `grep -n "expire >= m->expire_clock" klippy/chelper/trdispatch.c`.
+
+   Important: `cherry-pick --no-commit` keeps the change in the index, so the
+   Klipper repository counts as modified (`git describe --dirty` reports
+   `-dirty`) and Moonraker refuses to update with
+   `Update aborted, repo has been modified`. Update order:
+
+   ```bash
+   # 1. drop the local change; `checkout --` does NOT work here — it restores
+   #    the index version, which is the patch itself
+   git -C ~/klipper restore --staged --worktree klippy/chelper/trdispatch.c
+   # 2. update Klipper (Moonraker/Mainsail or git -C ~/klipper pull)
+   # 3. verify the fix arrived from upstream
+   grep -n "expire >= m->expire_clock" ~/klipper/klippy/chelper/trdispatch.c
+   # 4. if the line is missing (master still lacks the fix), re-apply it
+   ```
+
+   If the change was committed locally, use `git revert` instead of step 1.
 
 2. **`can0` TX queue depth.** `ifup@can0` must raise `txqueuelen 1024`: with
    the default 10 frames Klipper logs
