@@ -129,6 +129,23 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** v24: скорости парковки и выравнивания портала удвоены.
+  `mechanics/v24.cfg`: `homing_speed` X/Y 25 → 50, Z 8 → 16 и
+  `second_homing_speed` 3 → 6, `[quad_gantry_level] speed` 100 → 200.
+  `geometry/v24-*.cfg` и `printers/v24-350/anchors.cfg`:
+  `[safe_z_home] speed` 50 → 100, `z_hop_speed` 15 → 30 (подъём на 30 мм
+  остаётся). `probe.speed` (3.0) не менялся — это скорость зондирования, её
+  удвоение ухудшило бы точность. Trident не затронут. Проверено офлайн
+  (`--check`, `check_config.py`); проверка на стенде — за оператором.
+  **EN:** v24: homing and gantry levelling speeds are doubled.
+  `mechanics/v24.cfg`: X/Y `homing_speed` 25 → 50, Z 8 → 16 and
+  `second_homing_speed` 3 → 6, `[quad_gantry_level] speed` 100 → 200.
+  `geometry/v24-*.cfg` and `printers/v24-350/anchors.cfg`:
+  `[safe_z_home] speed` 50 → 100, `z_hop_speed` 15 → 30 (the 30 mm lift is
+  unchanged). `probe.speed` (3.0) is untouched — that is the probing speed and
+  doubling it would hurt accuracy. The trident is not affected. Verified
+  offline (`--check`, `check_config.py`); the bench run is left to the operator.
+
 - **RU:** Стенд `printers/v24-350`: инверсия направлений всех четырёх Z-моторов
   отменена — вернулся референсный рисунок `Z0=DIR_2`, `Z1=!DIR_3`, `Z2=DIR_4`,
   `Z3=!DIR_5`. При инверсии первый же подъём `[safe_z_home]` на +30 мм уводил

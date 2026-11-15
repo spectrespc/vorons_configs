@@ -91,8 +91,8 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   портал на **30 мм** до парковки X/Y (`z_hop: 30`), чтобы низкий или
   перекошенный портал не протащил сопло по столу; после `G28 Z` портал также
   остаётся на 30 мм. Значение задано и в `geometry/v24-*.cfg` (по умолчанию для
-  всей модели), профильный `anchors.cfg` его перекрывает. `speed: 50.0`,
-  `z_hop_speed: 15.0`. Якоря `quad_gantry_level` и реальные лимиты ещё не
+  всей модели), профильный `anchors.cfg` его перекрывает. `speed: 100.0`,
+  `z_hop_speed: 30.0`. Якоря `quad_gantry_level` и реальные лимиты ещё не
   замерены.
 - `hold_current` для Z задавать не нужно: `configfile.settings` показывает
   унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
@@ -536,7 +536,7 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
   gantry cannot drag the nozzle across the bed; after `G28 Z` the gantry also
   stays 30 mm up. The value is also set in `geometry/v24-*.cfg` as the default
   for the whole model, and the profile `anchors.cfg` overrides it.
-  `speed: 50.0`, `z_hop_speed: 15.0`. The `quad_gantry_level` anchors and the
+  `speed: 100.0`, `z_hop_speed: 30.0`. The `quad_gantry_level` anchors and the
   real limits are not measured yet.
 - `hold_current` is not needed for Z: `configfile.settings` shows the inherited
   maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
