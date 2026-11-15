@@ -65,7 +65,10 @@ mini12864 переводится на software SPI (`display/mini12864-swspi.cfg
 `config_m8p_v1_usb` (v1.0, чистый USB) и `config_m8p_v1_can` (v1.1,
 USB-CAN-мост на `PD12`/`PD13`). Стол на v1.x, как и на V2.0, включается через
 `FAN0` (`bed/manta-m8p.cfg`); выделенный выход `HEAT_HB` (`PB7`) остаётся
-свободным, пока профиль не переопределит `[heater_bed] heater_pin`.
+свободным, пока профиль не переопределит `[heater_bed] heater_pin`. Общий
+`sensors/tmc5160/manta-m8p.cfg` читает `TH3` (`PA4`): без термистора драйвера
+на этом входе Klipper уходит в shutdown при старте, поэтому датчик нужно
+установить либо убрать include.
 
 Термисторы M8P V2.0 в профиле v24: `THB` — стол, `TH0` — Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; встроенный `Generic 3950` —
@@ -308,7 +311,9 @@ scripts/flash_mcu.sh linux             # make flash
 `canbus_uuid` у `[mcu]`, пропускает CAN-узлы при отсутствии `can0` (для них
 нужен внешний CAN-адаптер) и **не прошивает** главную плату: после прогона он
 печатает команду `flash_mcu.sh serial -f …` (или `dfu` для первой установки
-загрузчика). В режиме `--auto` это предупреждение выводится отдельно.
+загрузчика). В режиме `--auto` скрипт пишет маркер
+`~/.cache/klipper-firmware/pending-main` и повторяет напоминание о ручной
+прошивке при каждом запуске, пока маркер не удалён после `flash_mcu.sh serial`.
 
 ```bash
 scripts/update_firmware.sh --dry-run     # только план
@@ -433,7 +438,10 @@ USB-CAN bridge. On v1.x the mini12864 moves to software SPI
 `spi2`. Firmware: `config_m8p_v1_usb` (V1.0, plain USB) and `config_m8p_v1_can`
 (V1.1, USB-CAN bridge on `PD12`/`PD13`). As on V2.0, the v1.x bed is switched
 through `FAN0` (`bed/manta-m8p.cfg`); the dedicated `HEAT_HB` (`PB7`) output
-stays free until a profile overrides `[heater_bed] heater_pin`.
+stays free until a profile overrides `[heater_bed] heater_pin`. The shared
+`sensors/tmc5160/manta-m8p.cfg` reads `TH3` (`PA4`): without a driver
+thermistor on that input Klipper shuts down at startup, so fit the sensor or
+drop the include.
 
 M8P V2.0 thermistors in the v24 profile: `THB` is the bed, `TH0` the Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; the built-in `Generic 3950` is a
@@ -674,7 +682,9 @@ is reachable over USB only. The script builds `config_m8p_v1_usb`, does not
 require a `canbus_uuid` for `[mcu]`, skips the CAN nodes when `can0` is absent
 (they need an external CAN adapter), and does **not** flash the main board:
 after the run it prints `flash_mcu.sh serial -f …` (or `dfu` for the first
-bootloader install). In `--auto` mode this warning is reported separately.
+bootloader install). In `--auto` mode the script writes a
+`~/.cache/klipper-firmware/pending-main` marker and repeats the manual-flash
+reminder on every run until the marker is removed after `flash_mcu.sh serial`.
 
 ```bash
 scripts/update_firmware.sh --dry-run     # plan only

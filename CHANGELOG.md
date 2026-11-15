@@ -20,7 +20,8 @@ Every entry is provided in Russian and English.
   `display/mini12864-swspi.cfg` (software SPI на EXP2 у v1.x), снапшоты
   прошивок `config_m8p_v1_usb` (чистый USB) и `config_m8p_v1_can`
   (USB-CAN-мост), ветки `update_firmware.sh` (v1.0 собирается, но прошивается
-  вручную через `flash_mcu.sh serial`/`dfu`), ось платы в
+  вручную через `flash_mcu.sh serial`/`dfu`, а `--auto` оставляет маркер
+  `pending-main` до ручной прошивки), ось платы в
   `deploy_configs.sh --matrix` и шаблон `uuids.cfg` в `new_machine.sh`.
   Конфиги проверены офлайн (валидация и обе сборки), на железе не проверялись.
   **EN:** Support for the BTT Manta M8P V1.0 and V1.1 revisions as `board`
@@ -31,7 +32,8 @@ Every entry is provided in Russian and English.
   override for software SPI on the v1.x EXP2 header, the firmware snapshots
   `config_m8p_v1_usb` (plain USB) and `config_m8p_v1_can` (USB-CAN bridge),
   `update_firmware.sh` branches (v1.0 is built but flashed manually with
-  `flash_mcu.sh serial`/`dfu`), the board axis in
+  `flash_mcu.sh serial`/`dfu`, and `--auto` leaves a `pending-main` marker
+  until the manual flash), the board axis in
   `deploy_configs.sh --matrix`, and the `uuids.cfg` template in
   `new_machine.sh`. The configs were verified offline (validation and both
   builds), not on hardware.

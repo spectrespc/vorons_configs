@@ -29,6 +29,9 @@ UUID_FILE=""
 CAN_IFACE="can0"
 OUT_ROOT="${OUT_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/klipper-firmware/out}"
 STAMP_FILE="${STAMP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/klipper-firmware/last-commit}"
+# A USB-only main board cannot be flashed by this script; --auto leaves this
+# marker behind so the pending manual step stays visible on later runs.
+PENDING_MAIN_FILE="${PENDING_MAIN_FILE:-$(dirname -- "${STAMP_FILE}")/pending-main}"
 PYTHON_BIN="${PYTHON:-python3}"
 JOBS=4
 AUTO=0
@@ -108,7 +111,10 @@ recovered automatically because it would take can0 down with it.
 A USB-only main board (Manta M8P V1.0, config_m8p_v1_usb) is built but not
 flashed: no canbus_uuid is required for [mcu], CAN nodes are skipped when can0
 is absent, and the main firmware is flashed by hand with
-"flash_mcu.sh serial" (or "dfu" for the first bootloader install).
+"flash_mcu.sh serial" (or "dfu" for the first bootloader install).  In --auto
+mode a pending-main marker is written next to the stamp and the reminder is
+repeated on later runs until the marker is removed:
+  ~/.cache/klipper-firmware/pending-main
 EOF
 }
 
@@ -521,6 +527,13 @@ print_plan() {
   fi
 }
 
+pending_main_note() {
+  [[ -f "$PENDING_MAIN_FILE" ]] || return 0
+  log "WARNING: main board flash is still pending ($PENDING_MAIN_FILE):"
+  log "WARNING:   $(cat -- "$PENDING_MAIN_FILE")"
+  log "WARNING: flash it with flash_mcu.sh serial, then remove the marker"
+}
+
 # --- main --------------------------------------------------------------------
 
 derive_configs
@@ -529,14 +542,17 @@ if [[ -z "$MAIN_CONFIG_PATH" && -z "$EXTRUDER_CONFIG_PATH" && -z "$EXTRA_CONFIG_
 fi
 resolve_uuids
 
-if (( AUTO && MAIN_USB_ONLY )); then
-  log "WARNING: the main board is USB-only; the automatic run cannot flash it"
-  log "WARNING: flash it afterwards with $SCRIPT_DIR/flash_mcu.sh serial"
+if (( MAIN_USB_ONLY )); then
+  pending_main_note
 fi
 
 if (( AUTO )); then
   CURRENT_COMMIT="$(git -C "$KLIPPER_DIR" rev-parse HEAD 2>/dev/null)" || \
     die "cannot read the Klipper commit in $KLIPPER_DIR"
+  if (( MAIN_USB_ONLY )); then
+    log "WARNING: the main board is USB-only; the automatic run cannot flash it"
+    log "WARNING: flash it afterwards with $SCRIPT_DIR/flash_mcu.sh serial"
+  fi
   if (( ! FORCE )) && [[ -f "$STAMP_FILE" ]] && \
       [[ "$(cat "$STAMP_FILE")" == "$CURRENT_COMMIT" ]]; then
     log "Klipper $CURRENT_COMMIT is already flashed; nothing to do"
@@ -568,6 +584,11 @@ if (( AUTO )); then
   mkdir -p "$(dirname -- "$STAMP_FILE")"
   printf '%s\n' "$CURRENT_COMMIT" > "$STAMP_FILE"
   log "Stamped $CURRENT_COMMIT in $STAMP_FILE"
+  if (( MAIN_USB_ONLY )); then
+    mkdir -p "$(dirname -- "$PENDING_MAIN_FILE")"
+    printf '%s %s\n' "$CURRENT_COMMIT" "$BIN_MAIN" > "$PENDING_MAIN_FILE"
+    log "WARNING: main board flash pending; marker written to $PENDING_MAIN_FILE"
+  fi
 fi
 
 log "Firmware update complete"
