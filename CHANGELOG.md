@@ -154,6 +154,17 @@ Every entry is provided in Russian and English.
   compares the formulas with the saved xlsx (±1 LSB). `docs/` is never deployed,
   verified with `deploy_configs.sh --check`.
 
+- **RU:** Конвенция доступа к хостам парка: каталог `secrets/` в `.gitignore`,
+  шаблон `secrets/hosts.env.example` в репозитории (переменные
+  `V24_350_HOST`/`V24_350_SSH_USER`/`V24_350_SSH_PASS`), рабочий
+  `secrets/hosts.env` — только локально, права `600`. Пароль никогда не
+  попадает в argv: скрипты используют переменную окружения.
+  **EN:** Fleet access convention: `secrets/` is gitignored, the repository
+  keeps the `secrets/hosts.env.example` template (`V24_350_HOST`,
+  `V24_350_SSH_USER`, `V24_350_SSH_PASS`), and the real `secrets/hosts.env`
+  stays local with mode `600`. The password never enters argv; scripts read it
+  from the environment.
+
 ### Changed / Изменено
 
 - **RU:** `render_profile.py` больше не хранит список драйверов X/Y в константе:
@@ -176,7 +187,10 @@ Every entry is provided in Russian and English.
   `[safe_z_home] speed` 50 → 100, `z_hop_speed` 15 → 30 (подъём на 30 мм
   остаётся). `probe.speed` (3.0) не менялся — это скорость зондирования, её
   удвоение ухудшило бы точность. Trident не затронут. Проверено офлайн
-  (`--check`, `check_config.py`); проверка на стенде — за оператором.
+  (`--check`, `check_config.py`). На стенде v24-350 (2026-11-15) прогон
+  `G28` → `QUAD_GANTRY_LEVEL` → `BED_MESH_CALIBRATE` на удвоенных скоростях
+  выполнен три раза без shutdown, после исправления хоста CAN (см. «Исправлено»);
+  скорости оставлены удвоенными.
   **EN:** v24: homing and gantry levelling speeds are doubled.
   `mechanics/v24.cfg`: X/Y `homing_speed` 25 → 50, Z 8 → 16 and
   `second_homing_speed` 3 → 6, `[quad_gantry_level] speed` 100 → 200.
@@ -184,7 +198,10 @@ Every entry is provided in Russian and English.
   `[safe_z_home] speed` 50 → 100, `z_hop_speed` 15 → 30 (the 30 mm lift is
   unchanged). `probe.speed` (3.0) is untouched — that is the probing speed and
   doubling it would hurt accuracy. The trident is not affected. Verified
-  offline (`--check`, `check_config.py`); the bench run is left to the operator.
+  offline (`--check`, `check_config.py`). On the v24-350 bench (2026-11-15)
+  `G28` → `QUAD_GANTRY_LEVEL` → `BED_MESH_CALIBRATE` ran three times at the
+  doubled speeds without a shutdown after the CAN host fix (see "Fixed"); the
+  doubled speeds are kept.
 
 - **RU:** Стенд `printers/v24-350`: инверсия направлений всех четырёх Z-моторов
   отменена — вернулся референсный рисунок `Z0=DIR_2`, `Z1=!DIR_3`, `Z2=DIR_4`,
@@ -370,6 +387,59 @@ Every entry is provided in Russian and English.
   (`GSTAT 0`, no `ola`/`olb`/`s2vs`) and a controlled Z move of +20 and −20 mm
   at 0.6 A completes without errors. `G28 Z` and `QUAD_GANTRY_LEVEL` have not
   been run yet. README now carries the verified map and test order.
+
+- **RU:** Стенд v24-350 (192.168.52.30): найдена и устранена причина shutdown
+  `MCU 'mcu' shutdown: Timer too close` при `G28`/`QUAD_GANTRY_LEVEL`. Причин
+  две, они независимы:
+  1. В Klipper `v0.13.0-816-gee2c6fb6` нет upstream-фикса `29d4ec2`
+     («trdispatch: Fix signed comparison when extending trsync timeout»):
+     в `klippy/chelper/trdispatch.c` знаковое `int64_t`-сравнение могло
+     отправить MCU `trsync_set_timeout` с уже прошедшим clock. Фикс применён
+     на стенде и на voron-t через `git cherry-pick --no-commit 29d4ec2`
+     (в дереве файл помечен как modified, chelper пересобирается при старте
+     Klipper, MCU перепрошивать не нужно).
+  2. Хост CAN: `/etc/network/interfaces` поднимал `txqueuelen 1024` командой
+     `ifconfig`, которой в системе нет (net-tools не установлен). Из-за этого
+     `ifup@can0` падал с кодом 1, а TX-очередь оставалась 10 кадров; за день
+     накопилось более 1200 сообщений `Got error -1 in can write: (105)No buffer
+     space available` (`bytes_retransmit=2228`, `retransmit_seq=5331`) —
+     часть `trsync_set_timeout` не доходила до MCU с первого раза. Команда
+     заменена на `up ip link set dev can0 txqueuelen 1024` (iproute2);
+     интерфейс переподнимать не потребовалось.
+  Проверка на стенде: три прогона `G28` → `QUAD_GANTRY_LEVEL` →
+  `BED_MESH_CALIBRATE` на удвоенных скоростях без shutdown; счётчик
+  `Timer too close` не вырос (4), новых `No buffer space available` нет
+  (1244 → 1244), `bytes_retransmit`/`retransmit_seq` застыли на 2558/357.
+  Отдельно зафиксировано: зонд стенда шумит (`Probe samples exceed tolerance`
+  почти на каждой точке), из-за чего `QUAD_GANTRY_LEVEL` идёт 230–450 с, а
+  сетка 10×10 — около 20 мин; якоря QGL остаются каталожными.
+  **EN:** Bench v24-350 (192.168.52.30): the cause of
+  `MCU 'mcu' shutdown: Timer too close` during `G28`/`QUAD_GANTRY_LEVEL` was
+  found and fixed. There are two independent causes:
+  1. Klipper `v0.13.0-816-gee2c6fb6` lacks the upstream fix `29d4ec2`
+     ("trdispatch: Fix signed comparison when extending trsync timeout"): the
+     signed `int64_t` comparison in `klippy/chelper/trdispatch.c` could send the
+     MCU a `trsync_set_timeout` whose clock had already passed. The fix was
+     applied on the bench and on voron-t with
+     `git cherry-pick --no-commit 29d4ec2` (the file shows as modified, chelper
+     rebuilds on the next Klipper start, no MCU reflash needed).
+  2. CAN host: `/etc/network/interfaces` raised `txqueuelen 1024` through
+     `ifconfig`, which does not exist here (net-tools is not installed). As a
+     result `ifup@can0` failed with exit code 1 and the TX queue stayed at
+     10 frames; over one day this produced more than 1200
+     `Got error -1 in can write: (105)No buffer space available` messages
+     (`bytes_retransmit=2228`, `retransmit_seq=5331`), so some
+     `trsync_set_timeout` frames did not reach the MCU on the first try. The
+     line now uses `up ip link set dev can0 txqueuelen 1024` (iproute2); the
+     interface did not have to be bounced.
+  Verified on the bench: three runs of `G28` → `QUAD_GANTRY_LEVEL` →
+  `BED_MESH_CALIBRATE` at the doubled speeds with no shutdown; the
+  `Timer too close` counter did not grow (4), no new
+  `No buffer space available` lines appeared (1244 → 1244), and
+  `bytes_retransmit`/`retransmit_seq` stayed at 2558/357. Separately noted: the
+  bench probe is noisy (`Probe samples exceed tolerance` on almost every
+  point), so `QUAD_GANTRY_LEVEL` takes 230–450 s and a 10x10 mesh about
+  20 minutes; the QGL anchors are still the catalog values.
 
 ## [1.3.0] - 2026-11-08
 

@@ -538,9 +538,12 @@ Klipper, прошивает платы, запускает Klipper и запис
   v24-350 дефект разъёма 4-го Z-мотора устранён: `DUMP_TMC` по всем четырём
   чистый, перемещение Z на ±20 мм на 0.6 А проходит. Направления Z —
   референсные (инверсия от 2026-11-15 отменена: подъём на 30 мм вёл портал
-  вниз), точка парковки и Z=0 — центр стола 175,175;
-  `G28 Z` и `QUAD_GANTRY_LEVEL` там пока не прогонялись, якоря QGL и реальные
-  лимиты не замерены. `z_offset` в общем `probe.cfg` (`-0.400`) снят на
+  вниз), точка парковки и Z=0 — центр стола 175,175. `G28`,
+  `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` на стенде прогоняются
+  (2026-11-15: три цикла без shutdown), но якоря QGL и реальные лимиты
+  по-прежнему не замерены, а зонд шумит — `Probe samples exceed tolerance`
+  почти на каждой точке, поэтому QGL идёт 230–450 с, а сетка 10×10 около
+  20 минут. `z_offset` в общем `probe.cfg` (`-0.400`) снят на
   voron-t и на стенде требует перекалибровки до первой печати.
   Вход probe у всей семьи M8P перенесён на `SENS_2` (M3-STOP, разъём с
   маркировкой «Z stop»): `PF2` у V2.0, `PF5` у V1.x; референсные M4-STOP/PF1
@@ -1098,9 +1101,12 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   4th Z motor connector defect is fixed (`DUMP_TMC` clean on all four, a ±20 mm
   Z move at 0.6 A passes). The Z directions are the reference ones (the
   2026-11-15 inversion was reverted: the 30 mm hop drove the gantry down); the
-  parking point / Z=0 is the bed centre 175,175; `G28 Z` and
-  `QUAD_GANTRY_LEVEL` have not been run there yet, and the QGL anchors and real
-  limits are not measured. The `z_offset` in the shared `probe.cfg` (`-0.400`)
+  parking point / Z=0 is the bed centre 175,175. `G28`,
+  `QUAD_GANTRY_LEVEL` and `BED_MESH_CALIBRATE` do run on the bench (2026-11-15:
+  three cycles without a shutdown), but the QGL anchors and real limits are
+  still not measured, and the probe is noisy — `Probe samples exceed tolerance`
+  on almost every point, so QGL takes 230–450 s and a 10x10 mesh about
+  20 minutes. The `z_offset` in the shared `probe.cfg` (`-0.400`)
   comes from voron-t and needs recalibration on the bench before the first
   print. The probe input of the whole M8P family moved to `SENS_2` (M3-STOP,
   the connector labelled "Z stop"): `PF2` on V2.0, `PF5` on V1.x; the reference
