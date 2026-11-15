@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Rebuild and flash every Klipper MCU after a Klipper update.
 #
-# The main board is a USB-CAN bridge: the host's can0 interface is provided by
-# that board itself.  Therefore the CAN nodes (toolhead and extra extruder) are
-# flashed first over CAN, and the bridge is flashed last through its bootloader
-# over USB (Katapult) or DFU.  Flashing the bridge over can0 would remove the
-# interface in the middle of the upload.
+# The main board is usually a USB-CAN bridge: the host's can0 interface is
+# provided by that board itself.  Therefore the CAN nodes (toolhead and extra
+# extruder) are flashed first over CAN, and the bridge is flashed last through
+# its bootloader over USB (Katapult) or DFU.  Flashing the bridge over can0
+# would remove the interface in the middle of the upload.
+#
+# A main board without a CAN transceiver (Manta M8P V1.0) cannot be part of that
+# flow: its firmware is built, but the board is reachable over USB only, so its
+# update stays a manual `flash_mcu.sh serial` (or `dfu`) step.  CAN nodes are
+# flashed only when can0 is present, which on such a machine needs an external
+# CAN adapter.
 #
 # On an interactive run the UUIDs are read from the deployed uuids.cfg, never
 # from this script.  --auto is intended for the systemd path/timer hook and
@@ -33,6 +39,7 @@ BUILD_ONLY=0
 SKIP_MAIN=0
 SKIP_EXTRUDER=0
 SKIP_EXTRA=0
+MAIN_USB_ONLY=0
 MAIN_CONFIG=""
 EXTRUDER_CONFIG=""
 EXTRA_CONFIG=""
@@ -97,6 +104,11 @@ The UUIDs come from the deployed uuids.cfg; this script never hardcodes them.
 The bridge's Katapult must support USB (Katapult-USB) or the board must fall
 back to the STM32 ROM DFU.  A CAN-only Katapult on the bridge cannot be
 recovered automatically because it would take can0 down with it.
+
+A USB-only main board (Manta M8P V1.0, config_m8p_v1_usb) is built but not
+flashed: no canbus_uuid is required for [mcu], CAN nodes are skipped when can0
+is absent, and the main firmware is flashed by hand with
+"flash_mcu.sh serial" (or "dfu" for the first bootloader install).
 EOF
 }
 
@@ -209,11 +221,18 @@ derive_configs() {
       case "$board" in
         manta-m5p) MAIN_CONFIG="config_m5p_v1" ;;
         manta-m8p) MAIN_CONFIG="config_m8p_v2" ;;
+        manta-m8p-v1.1) MAIN_CONFIG="config_m8p_v1_can" ;;
+        manta-m8p-v1.0) MAIN_CONFIG="config_m8p_v1_usb" ;;
         *) die "unknown board '$board'; pass --main-config" ;;
       esac
     fi
     MAIN_CONFIG_PATH="$(resolve_config "$MAIN_CONFIG")"
     [[ -f "$MAIN_CONFIG_PATH" ]] || die "main Kconfig not found: $MAIN_CONFIG_PATH"
+    # A USB-only image has neither a CAN UUID nor a bridge to flash; derive the
+    # mode from the snapshot so --main-config overrides behave the same way.
+    if [[ "$(basename -- "$MAIN_CONFIG_PATH")" == "config_m8p_v1_usb" ]]; then
+      MAIN_USB_ONLY=1
+    fi
   fi
 
   toolhead="$(machine_value toolhead)"
@@ -280,7 +299,10 @@ read_uuid() {
 
 resolve_uuids() {
   resolve_uuid_file
-  (( SKIP_MAIN )) || UUID_MAIN="$(read_uuid 'mcu')"
+  # A USB-only main board has no canbus_uuid; its [mcu] section uses serial:.
+  if (( ! SKIP_MAIN )) && (( ! MAIN_USB_ONLY )); then
+    UUID_MAIN="$(read_uuid 'mcu')"
+  fi
   if [[ -n "$EXTRUDER_CONFIG_PATH" ]]; then
     UUID_EXTRUDER="$(read_uuid 'mcu extruder')"
   fi
@@ -422,18 +444,37 @@ stop_klipper() {
   fi
 }
 
+can_interface_present() {
+  [[ -e "/sys/class/net/$CAN_IFACE" ]]
+}
+
 flash_all() {
-  if [[ -n "$BIN_EXTRA" ]]; then
-    log "Flashing extra extruder $UUID_EXTRA"
-    "$SCRIPT_DIR/flash_mcu.sh" can --no-service -i "$CAN_IFACE" \
-      -u "$UUID_EXTRA" -f "$BIN_EXTRA"
-  fi
-  if [[ -n "$BIN_EXTRUDER" ]]; then
-    log "Flashing toolhead $UUID_EXTRUDER"
-    "$SCRIPT_DIR/flash_mcu.sh" can --no-service -i "$CAN_IFACE" \
-      -u "$UUID_EXTRUDER" -f "$BIN_EXTRUDER"
+  if [[ -n "$BIN_EXTRA" || -n "$BIN_EXTRUDER" ]]; then
+    if can_interface_present; then
+      if [[ -n "$BIN_EXTRA" ]]; then
+        log "Flashing extra extruder $UUID_EXTRA"
+        "$SCRIPT_DIR/flash_mcu.sh" can --no-service -i "$CAN_IFACE" \
+          -u "$UUID_EXTRA" -f "$BIN_EXTRA"
+      fi
+      if [[ -n "$BIN_EXTRUDER" ]]; then
+        log "Flashing toolhead $UUID_EXTRUDER"
+        "$SCRIPT_DIR/flash_mcu.sh" can --no-service -i "$CAN_IFACE" \
+          -u "$UUID_EXTRUDER" -f "$BIN_EXTRUDER"
+      fi
+    elif (( MAIN_USB_ONLY )); then
+      log "WARNING: $CAN_IFACE is not available; skipping the CAN nodes"
+      log "WARNING: connect a CAN adapter (the V1.0 main board has no CAN transceiver) or flash them by hand"
+    else
+      die "CAN interface $CAN_IFACE is not available; the main board is not a USB-CAN bridge"
+    fi
   fi
   if [[ -n "$BIN_MAIN" ]]; then
+    if (( MAIN_USB_ONLY )); then
+      log "WARNING: the main board is USB-only; $BIN_MAIN was built but not flashed"
+      log "Flash it manually: $SCRIPT_DIR/flash_mcu.sh serial -f $BIN_MAIN"
+      log "First bootloader install: $SCRIPT_DIR/flash_mcu.sh dfu -f $BIN_MAIN (mass erase!)"
+      return 0
+    fi
     log "Flashing main bridge $UUID_MAIN via $MAIN_METHOD"
     local -a args=(
       bridge --no-service -i "$CAN_IFACE" -u "$UUID_MAIN" -f "$BIN_MAIN"
@@ -450,7 +491,13 @@ print_plan() {
   log "Profile: $PROFILE"
   log "Klipper: $KLIPPER_DIR"
   log "UUIDs:   $UUID_FILE"
-  [[ -n "$MAIN_CONFIG_PATH" ]] && log "Main:    $(basename "$MAIN_CONFIG_PATH") UUID $UUID_MAIN"
+  if [[ -n "$MAIN_CONFIG_PATH" ]]; then
+    if (( MAIN_USB_ONLY )); then
+      log "Main:    $(basename "$MAIN_CONFIG_PATH") (USB only; flash manually)"
+    else
+      log "Main:    $(basename "$MAIN_CONFIG_PATH") UUID $UUID_MAIN"
+    fi
+  fi
   [[ -n "$EXTRUDER_CONFIG_PATH" ]] && log "Toolhead $(basename "$EXTRUDER_CONFIG_PATH") UUID $UUID_EXTRUDER"
   [[ -n "$EXTRA_CONFIG_PATH" ]] && log "Extra:   $(basename "$EXTRA_CONFIG_PATH") UUID $UUID_EXTRA"
   if [[ -n "$BIN_EXTRA" ]]; then
@@ -462,9 +509,15 @@ print_plan() {
       "$SCRIPT_DIR/flash_mcu.sh" "$CAN_IFACE" "$UUID_EXTRUDER" "$BIN_EXTRUDER"
   fi
   if [[ -n "$BIN_MAIN" ]]; then
-    printf '+ %s bridge --no-service -i %s -u %s -f %s --method %s -c %s\n' \
-      "$SCRIPT_DIR/flash_mcu.sh" "$CAN_IFACE" "$UUID_MAIN" "$BIN_MAIN" \
-      "$MAIN_METHOD" "$MAIN_CONFIG_PATH"
+    if (( MAIN_USB_ONLY )); then
+      printf '+ (manual) %s serial -f %s\n' "$SCRIPT_DIR/flash_mcu.sh" "$BIN_MAIN"
+      printf '+ (manual) %s dfu -f %s   # first bootloader install, mass erase\n' \
+        "$SCRIPT_DIR/flash_mcu.sh" "$BIN_MAIN"
+    else
+      printf '+ %s bridge --no-service -i %s -u %s -f %s --method %s -c %s\n' \
+        "$SCRIPT_DIR/flash_mcu.sh" "$CAN_IFACE" "$UUID_MAIN" "$BIN_MAIN" \
+        "$MAIN_METHOD" "$MAIN_CONFIG_PATH"
+    fi
   fi
 }
 
@@ -475,6 +528,11 @@ if [[ -z "$MAIN_CONFIG_PATH" && -z "$EXTRUDER_CONFIG_PATH" && -z "$EXTRA_CONFIG_
   die "nothing to update: all MCUs are skipped (check --skip-* options)"
 fi
 resolve_uuids
+
+if (( AUTO && MAIN_USB_ONLY )); then
+  log "WARNING: the main board is USB-only; the automatic run cannot flash it"
+  log "WARNING: flash it afterwards with $SCRIPT_DIR/flash_mcu.sh serial"
+fi
 
 if (( AUTO )); then
   CURRENT_COMMIT="$(git -C "$KLIPPER_DIR" rev-parse HEAD 2>/dev/null)" || \

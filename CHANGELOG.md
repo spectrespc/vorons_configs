@@ -12,6 +12,30 @@ Every entry is provided in Russian and English.
 
 ### Added / Добавлено
 
+- **RU:** Поддержка ревизий BTT Manta M8P V1.0 и V1.1 как значений оси
+  `board`: `manta-m8p-v1.0`, `manta-m8p-v1.1`. Добавлены файлы пинов
+  `boards/manta-m8p-v1.0.cfg`/`-v1.1.cfg` (STM32G0B1, 8 МГц, 8 КиБ загрузчик;
+  ревизии различаются только MOTOR6..MOTOR8, CAN-трансивер есть только у v1.1
+  на `PD12`/`PD13`), общий дисплейный override
+  `display/mini12864-swspi.cfg` (software SPI на EXP2 у v1.x), снапшоты
+  прошивок `config_m8p_v1_usb` (чистый USB) и `config_m8p_v1_can`
+  (USB-CAN-мост), ветки `update_firmware.sh` (v1.0 собирается, но прошивается
+  вручную через `flash_mcu.sh serial`/`dfu`), ось платы в
+  `deploy_configs.sh --matrix` и шаблон `uuids.cfg` в `new_machine.sh`.
+  Конфиги проверены офлайн (валидация и обе сборки), на железе не проверялись.
+  **EN:** Support for the BTT Manta M8P V1.0 and V1.1 revisions as `board`
+  values: `manta-m8p-v1.0`, `manta-m8p-v1.1`. New pin files
+  `boards/manta-m8p-v1.0.cfg`/`-v1.1.cfg` (STM32G0B1, 8 MHz, 8 KiB bootloader;
+  the revisions differ only at MOTOR6..MOTOR8, and only v1.1 has a CAN
+  transceiver on `PD12`/`PD13`), a shared `display/mini12864-swspi.cfg`
+  override for software SPI on the v1.x EXP2 header, the firmware snapshots
+  `config_m8p_v1_usb` (plain USB) and `config_m8p_v1_can` (USB-CAN bridge),
+  `update_firmware.sh` branches (v1.0 is built but flashed manually with
+  `flash_mcu.sh serial`/`dfu`), the board axis in
+  `deploy_configs.sh --matrix`, and the `uuids.cfg` template in
+  `new_machine.sh`. The configs were verified offline (validation and both
+  builds), not on hardware.
+
 - **RU:** `scripts/update_firmware.sh` пересобирает прошивки по `machine.conf`
   и обновляет MCU после обновления Klipper: сначала `ext-extruder` и `extruder`
   по CAN, последней — главную плату. UUID читаются из развёрнутого

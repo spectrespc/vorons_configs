@@ -36,7 +36,8 @@ Required:
       --model MODEL   trident (3Z, z_tilt) or v24 (4Z, quad_gantry_level)
 
 Optional:
-      --board NAME    manta-m5p or manta-m8p (default: per model)
+      --board NAME    manta-m5p, manta-m8p (M8P V2.0), manta-m8p-v1.0 or
+                      manta-m8p-v1.1 (default: per model)
       --xy-step V     0.9 only for 150 mm, 1.8 for larger machines
                       (default: 0.9 at 150, 1.8 otherwise)
       --xy-driver NAME tmc5160-17HM19-1684 or
@@ -83,6 +84,18 @@ done
 # uses LDO-42STH48-2804AC (1.8 degree) on TMC5160.
 if [[ -z "$XY_STEP" ]]; then
   if [[ "$SIZE" == "150" ]]; then XY_STEP="0.9"; else XY_STEP="1.8"; fi
+fi
+
+# Effective board: the explicit --board or the per-model default.  It decides
+# whether the main MCU is a CAN node or USB only (M8P V1.0).
+if [[ -n "$BOARD" ]]; then
+  EFFECTIVE_BOARD="$BOARD"
+else
+  case "$MODEL" in
+    trident) EFFECTIVE_BOARD="manta-m5p" ;;
+    v24)     EFFECTIVE_BOARD="manta-m8p" ;;
+    *)       EFFECTIVE_BOARD="" ;;
+  esac
 fi
 
 # An interactive wizard asks for the feature set instead of silently creating a
@@ -210,8 +223,14 @@ EOF
   echo "# Replace the placeholders below before the first Klipper start."
   echo
   echo "[mcu]"
-  echo "#serial: /dev/serial/by-id/usb-Klipper_Klipper_firmware_12345-if00"
-  echo "canbus_uuid: REPLACE_WITH_MAIN_MCU_UUID"
+  if [[ "$EFFECTIVE_BOARD" == "manta-m8p-v1.0" ]]; then
+    # The V1.0 has no CAN transceiver: the host talks to the main MCU over USB.
+    echo "serial: /dev/serial/by-id/usb-Klipper_Klipper_firmware_12345-if00"
+    echo "#canbus_uuid: REPLACE_WITH_MAIN_MCU_UUID   # M8P V1.0 is USB only"
+  else
+    echo "#serial: /dev/serial/by-id/usb-Klipper_Klipper_firmware_12345-if00"
+    echo "canbus_uuid: REPLACE_WITH_MAIN_MCU_UUID"
+  fi
   echo
   echo "[mcu extruder]"
   echo "canbus_uuid: REPLACE_WITH_TOOLHEAD_UUID"

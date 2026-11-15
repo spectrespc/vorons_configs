@@ -44,6 +44,7 @@ OPTCRE = configparser.RawConfigParser.OPTCRE
 # Modules that are deliberately kept in the repository as fleet alternatives
 # and are therefore not expected to be included by the reference profile.
 ALT_MODULES = {
+    "std.configs/display/mini12864-swspi.cfg",
     "std.configs/extruder/heads/BMG.8T.cfg",
     "std.configs/extruder/tc/104-gt2.cfg",
     "std.configs/sht36-v3.eddy.cfg",
@@ -64,7 +65,11 @@ CATALOG_PREFIXES = (
 
 # Layers that intentionally reopen sections to override earlier values. Their
 # duplicate-section and repeated-option diagnostics are expected noise.
-OVERRIDE_FILES = ("anchors.cfg", "machine-extras.cfg")
+OVERRIDE_FILES = (
+    "anchors.cfg",
+    "machine-extras.cfg",
+    "mini12864-swspi.cfg",
+)
 
 # Options whose value names an MCU (or a board_pins alias that maps to one).
 # They are not pin references, so they are resolved as plain names.

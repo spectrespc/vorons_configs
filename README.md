@@ -15,7 +15,7 @@
 |---|---|---|
 | `size` | `150`, `200`, `250`, `300`, `350` | размер стола, мм |
 | `model` | `trident`, `v24` | 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
-| `board` | `manta-m5p`, `manta-m8p` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
+| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
 | `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150, иначе `1.8` |
 | `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | драйвер/мотор X/Y; по умолчанию следует за `size` |
 | `toolhead` | модуль из `std.configs/boards/` | плата инструментальной головы |
@@ -52,6 +52,20 @@ TMC5160 X/Y в репозитории разделены по плате: M8P V2
 CS-пином на драйвер; M5P — аппаратный `spi2`. Аппаратный `spi1` на M8P V2.0
 занимает `PA7`, который в этой раскладке является `TH3` (термистор драйвера),
 поэтому одновременно `spi1` и `TH3` использовать нельзя.
+
+Ревизии M8P выбираются осью `board`: `manta-m8p` — V2.0 (STM32H723, 25 МГц,
+USB-CAN-мост), `manta-m8p-v1.0` и `manta-m8p-v1.1` — STM32G0B1, 8 МГц,
+8 КиБ загрузчик. Все три значения используют общие `fans/manta-m8p/`,
+`bed/manta-m8p.cfg`, `mechanics/tmc/manta-m8p/` и `sensors/*/manta-m8p.cfg`;
+отличия живут только в файле пинов. v1.0 и v1.1 различаются только
+MOTOR6..MOTOR8. CAN-трансивер есть только у v1.1 (`PD12`/`PD13`), поэтому
+v1.0 подключается к хосту по USB и не может быть USB-CAN-мостом. На v1.x
+mini12864 переводится на software SPI (`display/mini12864-swspi.cfg`): на
+`EXP2_6` у них `PB11` (SPI1_MOSI), а не `spi2`. Прошивки:
+`config_m8p_v1_usb` (v1.0, чистый USB) и `config_m8p_v1_can` (v1.1,
+USB-CAN-мост на `PD12`/`PD13`). Стол на v1.x, как и на V2.0, включается через
+`FAN0` (`bed/manta-m8p.cfg`); выделенный выход `HEAT_HB` (`PB7`) остаётся
+свободным, пока профиль не переопределит `[heater_bed] heater_pin`.
 
 Термисторы M8P V2.0 в профиле v24: `THB` — стол, `TH0` — Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; встроенный `Generic 3950` —
@@ -114,7 +128,7 @@ vorons_configs/
 │       ├── local/              # UUID, PID, input shaper, extruder → std.config.local/
 │       └── KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf  # seed
 ├── std.configs/
-│   ├── boards/                 # pinout плат: manta-m5p, manta-m8p, toolhead-платы
+│   ├── boards/                 # pinout плат: manta-m5p, manta-m8p (V2.0), manta-m8p-v1.x, toolhead-платы
 │   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (драйверы)
 │   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
 │   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
@@ -171,9 +185,10 @@ git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && g
 # 2. Оффлайн-проверка без записи в живой каталог
 ./scripts/deploy_configs.sh -p voron-t --check
 
-# 3. Матрица 20 комбинаций: 10 model × size × (full | lite без SHT42)
+# 3. Матрица 40 комбинаций: (trident + 3 платы v24) × size × (full | lite без SHT42)
 ./scripts/deploy_configs.sh -p voron-t --matrix
 ./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
+./scripts/deploy_configs.sh -p voron-t --check --axis board=manta-m8p-v1.1
 
 # 4. Деплой на принтере
 ./scripts/deploy_configs.sh -p voron-t -b
@@ -207,7 +222,7 @@ git commit -m "Tune voron-t" && git push
 
 | Скрипт | Назначение |
 |---|---|
-| `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix` (full/lite), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix` (full/lite, по платам), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <профиль> [--write]` | рендер `profile.cfg` из `machine.conf` |
 | `scripts/check_config.py` | офлайн-парсер: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
 | `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → профиль + autosave-снимок |
@@ -238,7 +253,9 @@ UUID читается из `local/uuids.cfg` или `flashtool.py -i can0 -q`, �
 | Секция Klipper | Конфиг | Метод | Примечание |
 |---|---|---|---|
 | `mcu` (M5P, trident) | `config_m5p_v1` | `bridge` | USB-CAN bridge: `can0` создаёт сама плата |
-| `mcu` (M8P, v24) | `config_m8p_v2` | `bridge` | первая установка Katapult — `dfu` |
+| `mcu` (M8P V2.0, v24) | `config_m8p_v2` | `bridge` | первая установка Katapult — `dfu` |
+| `mcu` (M8P V1.1) | `config_m8p_v1_can` | `bridge` | USB-CAN bridge на `PD12`/`PD13`; первая установка — `dfu` |
+| `mcu` (M8P V1.0) | `config_m8p_v1_usb` | `serial` | только USB, CAN-трансивера нет; `dfu` — первичная установка загрузчика |
 | `extruder` | `config_sht36_v3` | `can` | toolhead |
 | `ext-extruder` | `config_sht42_v1` | `can` | загрузчик `config_sht42_katapult.v1` → `dfu` |
 | `host` | `config_linux` | `linux` | process MCU, `make flash` |
@@ -286,6 +303,13 @@ scripts/flash_mcu.sh linux             # make flash
 главную плату через `bridge`. UUID берутся из развёрнутого
 `std.config.local/uuids.cfg`, в скрипте они не хардкодятся.
 
+Исключение — `board=manta-m8p-v1.0`: у платы нет CAN-трансивера, она
+доступна только по USB. Скрипт собирает `config_m8p_v1_usb`, не требует
+`canbus_uuid` у `[mcu]`, пропускает CAN-узлы при отсутствии `can0` (для них
+нужен внешний CAN-адаптер) и **не прошивает** главную плату: после прогона он
+печатает команду `flash_mcu.sh serial -f …` (или `dfu` для первой установки
+загрузчика). В режиме `--auto` это предупреждение выводится отдельно.
+
 ```bash
 scripts/update_firmware.sh --dry-run     # только план
 scripts/update_firmware.sh               # сборка и прошивка
@@ -319,6 +343,16 @@ Klipper, прошивает платы, запускает Klipper и запис
 
 ### Известные ограничения
 
+- `boards/manta-m8p-v1.0.cfg` и `boards/manta-m8p-v1.1.cfg` собраны по эталонам
+  Voron (`Voron2_M8P-v1.0/1.1_config.cfg`) и Klipper
+  (`generic-bigtreetech-manta-m8p-v1.0/1.1.cfg`) и проверены офлайн (`--check`
+  и сборка обеих прошивок); на железе они не проверялись. Перед вводом машины
+  проверить направления DIR, перемычку NPN/PNP входа probe (`PC0`) и то, что
+  дисплей живёт на software SPI.
+- v1.0 без CAN-трансивера: toolhead и extra extruder на CAN требуют внешнего
+  USB-CAN-адаптера, а главная плата никогда не прошивается автоматически
+  (только `flash_mcu.sh serial`/`dfu`). После обновления Klipper это ручной шаг,
+  даже при установленном systemd-хуке.
 - `boards/manta-m8p.cfg` собран по эталону `Voron2_M8P-v2.0_config.cfg` и
   проверен на тестовой 2.4 350: конфиг загружается, все MCU подключаются; на
   целевой машине остаётся проверить датчики, драйверы и движение.
@@ -348,7 +382,7 @@ every deploy.
 |---|---|---|
 | `size` | `150`, `200`, `250`, `300`, `350` | bed size, mm |
 | `model` | `trident`, `v24` | 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
-| `board` | `manta-m5p`, `manta-m8p` | main board (default: trident → m5p, v24 → m8p) |
+| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | main board (default: trident → m5p, v24 → m8p) |
 | `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm, otherwise `1.8` |
 | `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | X/Y driver/motor; follows `size` by default |
 | `toolhead` | module under `std.configs/boards/` | toolhead board |
@@ -386,6 +420,20 @@ TMC5160 X/Y configs are split by board: the M8P V2.0 uses the shared
 CS pin per driver; the M5P uses hardware `spi2`. Hardware `spi1` on the M8P V2.0
 reserves `PA7`, which is `TH3` (the driver thermistor) in this layout, so `spi1`
 and `TH3` cannot be used together.
+
+M8P revisions are selected with the `board` axis: `manta-m8p` is V2.0
+(STM32H723, 25 MHz, USB-CAN bridge), while `manta-m8p-v1.0` and
+`manta-m8p-v1.1` are STM32G0B1, 8 MHz, 8 KiB bootloader. All three use the
+shared `fans/manta-m8p/`, `bed/manta-m8p.cfg`, `mechanics/tmc/manta-m8p/` and
+`sensors/*/manta-m8p.cfg` modules; the differences live only in the pin file.
+V1.0 and V1.1 differ only at MOTOR6..MOTOR8. Only V1.1 has a CAN transceiver
+(`PD12`/`PD13`), so V1.0 talks to the host over USB and cannot run as a
+USB-CAN bridge. On v1.x the mini12864 moves to software SPI
+(`display/mini12864-swspi.cfg`) because `EXP2_6` is `PB11` (SPI1_MOSI), not
+`spi2`. Firmware: `config_m8p_v1_usb` (V1.0, plain USB) and `config_m8p_v1_can`
+(V1.1, USB-CAN bridge on `PD12`/`PD13`). As on V2.0, the v1.x bed is switched
+through `FAN0` (`bed/manta-m8p.cfg`); the dedicated `HEAT_HB` (`PB7`) output
+stays free until a profile overrides `[heater_bed] heater_pin`.
 
 M8P V2.0 thermistors in the v24 profile: `THB` is the bed, `TH0` the Y-frame
 (NTC 10K B3950, `sensor_type: ntc10k_3950`; the built-in `Generic 3950` is a
@@ -447,7 +495,7 @@ vorons_configs/
 │       ├── local/              # UUIDs, PID, input shaper, extruder → std.config.local/
 │       └── KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf  # seed
 ├── std.configs/
-│   ├── boards/                 # board pinouts: manta-m5p, manta-m8p, toolhead boards
+│   ├── boards/                 # board pinouts: manta-m5p, manta-m8p (V2.0), manta-m8p-v1.x, toolhead boards
 │   ├── mechanics/              # trident.cfg, v24.cfg, tmc/ (drivers)
 │   ├── motors/                 # xy-step-0.9.cfg, xy-step-1.8.cfg
 │   ├── geometry/               # trident-{150..350}.cfg, v24-{150..350}.cfg
@@ -503,9 +551,10 @@ git add printers/voron-t/profile.cfg && git commit -m "Change voron-t axes" && g
 # 2. Offline check, nothing is written to the live tree
 ./scripts/deploy_configs.sh -p voron-t --check
 
-# 3. Matrix of 20 combos: 10 model x size x (full | lite without SHT42)
+# 3. Matrix of 40 combos: (trident + 3 v24 boards) x size x (full | lite without SHT42)
 ./scripts/deploy_configs.sh -p voron-t --matrix
 ./scripts/deploy_configs.sh -p voron-t --check --axis model=v24 --axis size=350
+./scripts/deploy_configs.sh -p voron-t --check --axis board=manta-m8p-v1.1
 
 # 4. Deploy on the printer
 ./scripts/deploy_configs.sh -p voron-t -b
@@ -539,7 +588,7 @@ anchors.
 
 | Script | Purpose |
 |---|---|
-| `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix` (full/lite), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
+| `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix` (full/lite, per board), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <profile> [--write]` | render `profile.cfg` from `machine.conf` |
 | `scripts/check_config.py` | offline parser: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
 | `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → profile + autosave snapshot |
@@ -570,7 +619,9 @@ hardcodes a UUID. `--dry-run` prints the commands and changes nothing.
 | Klipper section | Config | Method | Note |
 |---|---|---|---|
 | `mcu` (M5P, trident) | `config_m5p_v1` | `bridge` | USB-CAN bridge: the board itself provides `can0` |
-| `mcu` (M8P, v24) | `config_m8p_v2` | `bridge` | first Katapult install via `dfu` |
+| `mcu` (M8P V2.0, v24) | `config_m8p_v2` | `bridge` | first Katapult install via `dfu` |
+| `mcu` (M8P V1.1) | `config_m8p_v1_can` | `bridge` | USB-CAN bridge on `PD12`/`PD13`; first install via `dfu` |
+| `mcu` (M8P V1.0) | `config_m8p_v1_usb` | `serial` | USB only, no CAN transceiver; `dfu` for the first bootloader install |
 | `extruder` | `config_sht36_v3` | `can` | toolhead |
 | `ext-extruder` | `config_sht42_v1` | `can` | bootloader `config_sht42_katapult.v1` → `dfu` |
 | `host` | `config_linux` | `linux` | process MCU, `make flash` |
@@ -618,6 +669,13 @@ the safe order: `ext-extruder` and `extruder` over CAN first, the main board
 last through `bridge`. UUIDs are read from the deployed
 `std.config.local/uuids.cfg`, never hardcoded in the script.
 
+The exception is `board=manta-m8p-v1.0`: that board has no CAN transceiver and
+is reachable over USB only. The script builds `config_m8p_v1_usb`, does not
+require a `canbus_uuid` for `[mcu]`, skips the CAN nodes when `can0` is absent
+(they need an external CAN adapter), and does **not** flash the main board:
+after the run it prints `flash_mcu.sh serial -f …` (or `dfu` for the first
+bootloader install). In `--auto` mode this warning is reported separately.
+
 ```bash
 scripts/update_firmware.sh --dry-run     # plan only
 scripts/update_firmware.sh               # build and flash
@@ -652,6 +710,16 @@ recovery.
 
 ### Known limitations
 
+- `boards/manta-m8p-v1.0.cfg` and `boards/manta-m8p-v1.1.cfg` follow the Voron
+  (`Voron2_M8P-v1.0/1.1_config.cfg`) and Klipper
+  (`generic-bigtreetech-manta-m8p-v1.0/1.1.cfg`) references and were verified
+  offline (`--check` plus both firmware builds); they have not been tested on
+  hardware. Before commissioning, check the DIR directions, the NPN/PNP jumper
+  of the probe input (`PC0`) and that the display works on software SPI.
+- V1.0 has no CAN transceiver: CAN toolhead and extra extruder need an external
+  USB-CAN adapter, and the main board is never flashed automatically (only
+  `flash_mcu.sh serial`/`dfu`). After a Klipper update this stays a manual step
+  even with the systemd hook installed.
 - `boards/manta-m8p.cfg` follows the `Voron2_M8P-v2.0_config.cfg` reference and
   was tested on a 2.4 350: the config loads and every MCU connects; sensors,
   drivers and motion still need validation on the target machine.

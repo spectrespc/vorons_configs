@@ -32,7 +32,10 @@ import sys
 # Accepted axis values. Keep in sync with check_config.py and README.
 SIZES = (150, 200, 250, 300, 350)
 MODELS = ("trident", "v24")
-BOARDS = ("manta-m5p", "manta-m8p")
+BOARDS = ("manta-m5p", "manta-m8p", "manta-m8p-v1.0", "manta-m8p-v1.1")
+# M8P revisions (V1.0, V1.1, V2.0) share every family module; only the pin file
+# and the display bus differ.  Modules are named after this family.
+BOARD_FAMILIES = ("manta-m5p", "manta-m8p")
 XY_STEPS = ("0.9", "1.8")
 XY_DRIVERS = ("tmc5160-17HM19-1684", "tmc5160-LDO-42STH48-2804AC")
 
@@ -272,10 +275,23 @@ def _require(path: str, context: str) -> None:
         raise ProfileError("%s refers to missing module %s" % (context, path))
 
 
+def board_family(board: str) -> str:
+    """Map a board revision to the shared module family.
+
+    All Manta M8P revisions use the same mechanic, fan, bed, sensor and TMC
+    modules; the version differences live in boards/<board>.cfg.
+    """
+    for family in BOARD_FAMILIES:
+        if board == family or board.startswith(family + "-"):
+            return family
+    return board
+
+
 def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[str]:
     size = checked["size"]
     model = checked["model"]
     board = checked["board"]
+    family = board_family(board)
     xy_step = checked["xy_step"]
     features = checked["features"]
 
@@ -286,12 +302,12 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
     includes.append("std.configs/mechanics/%s.cfg" % model)
     includes.append(
         "std.configs/mechanics/tmc/%s/xy-%s.cfg"
-        % (board, checked["xy_driver"])
+        % (family, checked["xy_driver"])
     )
-    if board == "manta-m8p":
-        # TH2/TH3 monitor the TMC5160 driver heatsinks on the M8P; the M5P
-        # uses those pins for the bed and Y-frame instead.
-        includes.append("std.configs/sensors/tmc5160/%s.cfg" % board)
+    if family == "manta-m8p":
+        # TH2/TH3 monitor the TMC5160 driver heatsinks on the M8P family; the
+        # M5P uses those pins for the bed and Y-frame instead.
+        includes.append("std.configs/sensors/tmc5160/%s.cfg" % family)
         # v24 Y-frame uses a 10K B3950 thermistor, not the 100K Generic 3950.
         if "y_frame" in features:
             includes.append("std.configs/sensors/ntc10k-3950.cfg")
@@ -299,21 +315,29 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
     includes.append("std.configs/geometry/%s-%d.cfg" % (model, size))
 
     # Subsystems that must be defined before the extruder/probe sections.
-    for name in ("fans", "display", "buttons"):
-        if name in features:
-            includes.extend(path.format(board=board) for path in FEATURES[name])
+    if "fans" in features:
+        includes.extend(path.format(board=family) for path in FEATURES["fans"])
+    if "display" in features:
+        includes.extend(path.format(board=family) for path in FEATURES["display"])
+        if board.startswith("manta-m8p-v1."):
+            # The v1.x EXP2 header does not carry the hardware spi2 MOSI, so
+            # the display section is reopened with software SPI.  Klipper
+            # merges same-named sections and the last value wins.
+            includes.append("std.configs/display/mini12864-swspi.cfg")
+    if "buttons" in features:
+        includes.extend(path.format(board=family) for path in FEATURES["buttons"])
     includes.append("std.configs/probe.cfg")
-    includes.append("std.configs/bed/%s.cfg" % board)
+    includes.append("std.configs/bed/%s.cfg" % family)
     if checked["head"]:
         includes.append("std.configs/extruder/heads/%s.cfg" % checked["head"])
     includes.append("std.configs/extruder/main.cfg")
     # Filament and host features that overlay the extruder/probe setup.
     for name in ("belay", "btt_sfs", "runout", "extra_extruder", "host"):
         if name in features:
-            includes.extend(path.format(board=board) for path in FEATURES[name])
+            includes.extend(path.format(board=family) for path in FEATURES[name])
     for name in ("y_frame", "eddy"):
         if name in features:
-            includes.extend(path.format(board=board) for path in FEATURES[name])
+            includes.extend(path.format(board=family) for path in FEATURES[name])
 
     includes.append("std.macros/test_speed.cfg")
     includes.append("anchors.cfg")

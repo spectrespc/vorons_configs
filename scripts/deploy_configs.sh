@@ -57,7 +57,7 @@ scripts/build_mcu.sh, not runtime Klipper configuration.
   -c, --check         render + stage + validate only; no writes, no prune
       --axis K=V      temporary axis override (matrix checks; implies --check)
       --render        regenerate printers/<profile>/profile.cfg from machine.conf
-      --matrix        validate all model x size combinations and exit
+      --matrix        validate all model x board x size combinations and exit
       --no-prune      keep legacy files that are otherwise pruned
   -h, --help          show this help
 
@@ -183,16 +183,32 @@ print(",".join(item for item in sys.argv[1].split(",") if item and item not in s
       feature_axis=(--axis "features=$lite_features")
     fi
     for model in trident v24; do
-      for size in 150 200 250 300 350; do
-        printf 'matrix: %s %s-%s ... ' "$variant" "$model" "$size"
-        if "$SCRIPT_DIR/deploy_configs.sh" -p "$PROFILE" -s "$SRC" \
-            --check --axis "model=$model" --axis "size=$size" \
-            ${feature_axis[@]+"${feature_axis[@]}"} >/dev/null; then
-          echo "ok"
-        else
-          echo "FAILED"
-          matrix_rc=1
+      if [[ "$model" == v24 ]]; then
+        # Every M8P revision is a valid main board for v24: V2.0 and the v1.x
+        # pair.  trident only has the M5P.
+        boards=(manta-m8p manta-m8p-v1.0 manta-m8p-v1.1)
+      else
+        boards=("")
+      fi
+      for board in "${boards[@]}"; do
+        board_axis=()
+        label="$model"
+        if [[ -n "$board" ]]; then
+          board_axis=(--axis "board=$board")
+          label="$board"
         fi
+        for size in 150 200 250 300 350; do
+          printf 'matrix: %s %s-%s ... ' "$variant" "$label" "$size"
+          if "$SCRIPT_DIR/deploy_configs.sh" -p "$PROFILE" -s "$SRC" \
+              --check --axis "model=$model" --axis "size=$size" \
+              ${board_axis[@]+"${board_axis[@]}"} \
+              ${feature_axis[@]+"${feature_axis[@]}"} >/dev/null; then
+            echo "ok"
+          else
+            echo "FAILED"
+            matrix_rc=1
+          fi
+        done
       done
     done
   done
