@@ -129,6 +129,24 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Стенд `printers/v24-350`: инверсия направлений всех четырёх Z-моторов
+  отменена — вернулся референсный рисунок `Z0=DIR_2`, `Z1=!DIR_3`, `Z2=DIR_4`,
+  `Z3=!DIR_5`. При инверсии первый же подъём `[safe_z_home]` на +30 мм уводил
+  портал вниз, то есть абсолютное «вверх» было перевёрнуто; инверсия вводилась
+  без прогона `G28` и оказалась неверной. Флип всех четырёх моторов не меняет
+  относительные знаки зеркальных углов и наклон `QUAD_GANTRY_LEVEL`. Проверено
+  офлайн (`--check`, `check_config.py`); подтверждение — небольшое перемещение
+  +Z, затем `G28` и `QUAD_GANTRY_LEVEL` на стенде.
+  **EN:** Bench `printers/v24-350`: the inversion of all four Z motor directions
+  is reverted — the reference corner pattern is back (`Z0=DIR_2`, `Z1=!DIR_3`,
+  `Z2=DIR_4`, `Z3=!DIR_5`). With the inversion the very first `[safe_z_home]`
+  +30 mm hop drove the gantry down, i.e. absolute up and down were swapped; the
+  inversion was added without a `G28` run and turned out to be wrong. Flipping
+  all four motors keeps the relative signs of the mirror-mounted corners and the
+  `QUAD_GANTRY_LEVEL` tilt behaviour. Verified offline (`--check`,
+  `check_config.py`); confirmation is a small +Z move, then `G28` and
+  `QUAD_GANTRY_LEVEL` on the bench.
+
 - **RU:** `std.macros/homing.cfg` снова рабочий и подключается профилем v24:
   датчик Z стоит на печатающей головке, поэтому `G28` (когда в запросе есть Z —
   голый `G28` или `G28 Z`) и `QUAD_GANTRY_LEVEL` обёрнуты температурной

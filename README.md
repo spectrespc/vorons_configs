@@ -79,11 +79,13 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   После исправления подключения `DUMP_TMC` по всем четырём чистый (`GSTAT 0`,
   без `ola`/`olb`/`s2vs`), а контролируемое перемещение Z на +20 и −20 мм на
   токе 0.6 А проходит без ошибок.
-- Направления Z инвертированы 2026-11-15 в `machine-extras.cfg`:
-  `Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`, `Z3=DIR_5`. Перевёрнуты сразу все
-  четыре мотора, поэтому относительные знаки зеркальных углов и поведение
-  `QUAD_GANTRY_LEVEL` по наклону не меняются, меняется только абсолютное
-  «вверх/вниз». `G28 Z` и `QUAD_GANTRY_LEVEL` ещё предстоит прогнать.
+- Направления Z в `machine-extras.cfg` — референсный угловой рисунок
+  `Z0=DIR_2`, `Z1=!DIR_3`, `Z2=DIR_4`, `Z3=!DIR_5`. Инверсия всех четырёх
+  моторов, сделанная 2026-11-15, отменена в тот же день: при ней подъём
+  `safe_z_home` на +30 мм вёл портал вниз. Флип всех четырёх моторов не меняет
+  относительные знаки зеркальных углов и наклон `QUAD_GANTRY_LEVEL`, меняется
+  только абсолютное «вверх/вниз». Подтверждение — небольшое перемещение +Z,
+  затем `G28 Z` и `QUAD_GANTRY_LEVEL`.
 - Парковка и Z=0 — в центре стола: `[safe_z_home]` с
   `home_xy_position: 175, 175` в `anchors.cfg`. Правило v24: `G28` поднимает
   портал на **30 мм** до парковки X/Y (`z_hop: 30`), чтобы низкий или
@@ -419,8 +421,9 @@ Klipper, прошивает платы, запускает Klipper и запис
   и Z-драйверы отвечают (см. раздел «Z-драйверы M8P V2.0»). Раскладка Z-слотов
   у машин разная и задаётся в `machine-extras.cfg` профиля; на стенде
   v24-350 дефект разъёма 4-го Z-мотора устранён: `DUMP_TMC` по всем четырём
-  чистый, перемещение Z на ±20 мм на 0.6 А проходит. Направления Z
-  инвертированы 2026-11-15, точка парковки и Z=0 — центр стола 175,175;
+  чистый, перемещение Z на ±20 мм на 0.6 А проходит. Направления Z —
+  референсные (инверсия от 2026-11-15 отменена: подъём на 30 мм вёл портал
+  вниз), точка парковки и Z=0 — центр стола 175,175;
   `G28 Z` и `QUAD_GANTRY_LEVEL` там пока не прогонялись, якоря QGL и реальные
   лимиты не замерены. `z_offset` в общем `probe.cfg` (`-0.400`) снят на
   voron-t и на стенде требует перекалибровки до первой печати.
@@ -519,11 +522,14 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
   bad connector on the 4th motor. After the connector was fixed `DUMP_TMC` is
   clean on all four (`GSTAT 0`, no `ola`/`olb`/`s2vs`), and a controlled Z move
   of +20 and −20 mm at 0.6 A completes without errors.
-- The Z directions were inverted on 2026-11-15 in `machine-extras.cfg`:
-  `Z0=!DIR_2`, `Z1=DIR_3`, `Z2=!DIR_4`, `Z3=DIR_5`. All four motors are
-  flipped together, so the relative signs of the mirror-mounted corners and the
-  `QUAD_GANTRY_LEVEL` tilt behaviour are unchanged; only the absolute up/down
-  direction flips. `G28 Z` and `QUAD_GANTRY_LEVEL` still need a run.
+- The Z directions in `machine-extras.cfg` follow the reference corner
+  pattern `Z0=DIR_2`, `Z1=!DIR_3`, `Z2=DIR_4`, `Z3=!DIR_5`. The all-four
+  inversion made on 2026-11-15 was reverted the same day: with it the
+  `safe_z_home` +30 mm hop drove the gantry down. Flipping all four motors
+  together keeps the relative signs of the mirror-mounted corners and the
+  `QUAD_GANTRY_LEVEL` tilt behaviour, and only changes the absolute up/down
+  direction. Confirmation is a small +Z move, then `G28 Z` and
+  `QUAD_GANTRY_LEVEL`.
 - Parking and Z=0 are at the bed centre: `[safe_z_home]` with
   `home_xy_position: 175, 175` in `anchors.cfg`. The v24 rule: `G28` lifts the
   gantry by **30 mm** before homing X/Y (`z_hop: 30`), so a low or tilted
@@ -859,7 +865,8 @@ recovery.
   Z drivers answer (see "M8P V2.0 Z drivers"). Each machine has its own Z slot
   layout, set in the profile's `machine-extras.cfg`; on the v24-350 bench the
   4th Z motor connector defect is fixed (`DUMP_TMC` clean on all four, a ±20 mm
-  Z move at 0.6 A passes). The Z directions were inverted on 2026-11-15 and the
+  Z move at 0.6 A passes). The Z directions are the reference ones (the
+  2026-11-15 inversion was reverted: the 30 mm hop drove the gantry down); the
   parking point / Z=0 is the bed centre 175,175; `G28 Z` and
   `QUAD_GANTRY_LEVEL` have not been run there yet, and the QGL anchors and real
   limits are not measured. The `z_offset` in the shared `probe.cfg` (`-0.400`)
