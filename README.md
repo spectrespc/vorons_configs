@@ -17,7 +17,7 @@
 | `model` | `trident`, `v24` | 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
 | `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
 | `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150, иначе `1.8` |
-| `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | драйвер/мотор X/Y; по умолчанию следует за `size` |
+| `xy_driver` | имя модуля `xy-<имя>.cfg` из `std.configs/mechanics/tmc/<плата>/`, существующего для обеих плат семейства (`tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC`) | драйвер/мотор X/Y; по умолчанию следует за `size` |
 | `toolhead` | модуль из `std.configs/boards/` | плата инструментальной головы |
 | `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | подключаемые подсистемы |
@@ -45,7 +45,9 @@ z_leg_measured=245
 2.8 А/фаза, `run_current: 1.697`). TMC5160 работает в SpreadCycle
 (`stealthchop_threshold: 0`), SPI 1 МГц, `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD =
 0/3/7/8/1/2`. `xy_driver` можно задать явно, но по умолчанию он выбирается по
-`size`, поэтому `--matrix` проверяет обе связки.
+`size`, поэтому `--matrix` проверяет обе связки. Новые модули «драйвер+мотор»
+генерирует `scripts/tmc_calc.py` (см. ниже) — после записи модуля для обеих
+плат имя сразу становится допустимым значением `xy_driver`.
 
 TMC5160 X/Y в репозитории разделены по плате: M8P V2.0 использует общий
 **software SPI** на `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) с отдельным
@@ -198,6 +200,7 @@ vorons_configs/
 │   └── fans/ display/ buttons/ extruder/ ...  # подсистемы
 ├── std.macros/                 # общие макросы
 ├── std.compil.configs/         # конфиги сборки MCU (НЕ деплоятся)
+├── docs/tmc/                   # калькуляторы Trinamic/ADI, CALCS.md, motors.json (НЕ деплоятся)
 └── scripts/                    # deploy/render/check/collect/build/flash
 ```
 
@@ -292,6 +295,60 @@ git commit -m "Tune voron-t" && git push
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
 | `scripts/update_firmware.sh [-p профиль] [--dry-run] [--auto]` | пересборка и прошивка всех MCU после обновления Klipper |
 | `scripts/install_update_hook.sh [--profile профиль] [--dry-run]` | установка systemd path/timer хука (нужен sudo) |
+| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | расчёт параметров TMC по даташиту мотора: `--write`, `--wire-profile`, `--json`, `--selftest` |
+
+### Расчёт TMC: `docs/tmc/` и `scripts/tmc_calc.py`
+
+`docs/tmc/` в деплой не попадает (копируются только `std.configs/**`,
+`std.macros/**` и файлы профиля) и содержит:
+
+- `TMC2209_Calculations.xlsx`, `TMC5160_Calculations.xlsx` — вендорские
+  калькуляторы Trinamic/ADI; адреса, дата и sha256 — `docs/tmc/SOURCES.md`;
+- `CALCS.md` — карта «лист/ячейка → формула → функция скрипта»; правило
+  проекта: новая формула сначала описывается здесь, потом попадает в скрипт;
+- `motors.json` — параметры моторов парка, у каждой записи обязательна ссылка
+  на даташит (`source`).
+
+`scripts/tmc_calc.py` считает рекомендованный `run_current` и параметры
+чоппера, а по умолчанию только печатает готовый stanza:
+
+```bash
+# мотор из базы: рекомендуемый ток и регистры
+python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24
+
+# свой мотор (ток, L и R — из даташита), несколько секций
+python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
+    --r-ohm 1.5 --vm 24 --section stepper_z --section stepper_z1
+
+# StealthChop вместо SpreadCycle; PWM_OFS/GRAD — из PWM_AUTO после автотюнинга
+python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
+    --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
+
+# записать модуль и перевести ось xy_driver на него
+python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
+    --write manta-m5p/xy-tmc5160-17HM19-1684.cfg --wire-profile printers/voron-t
+```
+
+Правила скрипта:
+
+- печатаются только ключи `driver_*` из белого списка, сверенного с
+  установленным Klipper (`driver_TPFD` есть только у TMC5160);
+- регистры тока (`CS`/`IRUN`, `GLOBALSCALER`) в конфиг не попадают: Klipper
+  считает их сам из `run_current`, в выводе они только для сверки;
+- `run_current = min(номинал × --i-factor, предел IC)`; мотор, у которого
+  номинал выше предела IC (например, 2.8 A на TMC2209 с шунтом 0.110 Ом),
+  отклоняется с кодом 2;
+- `--write` пишет только внутрь `std.configs/mechanics/tmc/`, без `--force`
+  существующий файл не перезаписывается;
+- `--wire-profile` проверяет `xy_step` профиля (1.8° мотор в машину с
+  `xy_step=0.9` не проведётся), правит `xy_driver` в `machine.conf` и
+  перегенерирует `profile.cfg`; дальше нужен
+  `./scripts/deploy_configs.sh -p <профиль> --check`;
+- `--selftest` сверяет формулы с сохранёнными xlsx (±1 LSB) и прогоняет doctest.
+
+`--i-factor 0.8` — стартовая точка; боевые `run_current` парка ниже (0.951 /
+0.800 / 0.600 A), это результат тепловых испытаний — сверка в
+`docs/tmc/CALCS.md`.
 
 ### Прошивка контроллеров
 
@@ -460,7 +517,7 @@ every deploy.
 | `model` | `trident`, `v24` | 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
 | `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | main board (default: trident → m5p, v24 → m8p) |
 | `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm, otherwise `1.8` |
-| `xy_driver` | `tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC` | X/Y driver/motor; follows `size` by default |
+| `xy_driver` | name of an `xy-<name>.cfg` module from `std.configs/mechanics/tmc/<board>/` that exists for both board families (`tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC`) | X/Y driver/motor; follows `size` by default |
 | `toolhead` | module under `std.configs/boards/` | toolhead board |
 | `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | optional subsystems |
@@ -489,7 +546,9 @@ every other size uses TMC5160 + LDO-42STH48-2804AC (1.8 degree, 55 Ncm,
 (`stealthchop_threshold: 0`), SPI at 1 MHz, with
 `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/8/1/2`. `xy_driver` may be set
 explicitly, but by default it follows `size`, so `--matrix` covers both
-combinations.
+combinations. New driver+motor modules are generated by `scripts/tmc_calc.py`
+(see below); once the module exists for both boards, its name is a valid
+`xy_driver` value.
 
 TMC5160 X/Y configs are split by board: the M8P V2.0 uses the shared
 **software SPI** bus on `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) with a separate
@@ -641,6 +700,7 @@ vorons_configs/
 │   └── fans/ display/ buttons/ extruder/ ...  # subsystems
 ├── std.macros/                 # shared macros
 ├── std.compil.configs/         # MCU build configs (NOT deployed)
+├── docs/tmc/                   # Trinamic/ADI calculators, CALCS.md, motors.json (NOT deployed)
 └── scripts/                    # deploy/render/check/collect/build/flash
 ```
 
@@ -734,6 +794,61 @@ anchors.
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | flash one controller |
 | `scripts/update_firmware.sh [-p profile] [--dry-run] [--auto]` | rebuild and flash all MCUs after a Klipper update |
 | `scripts/install_update_hook.sh [--profile profile] [--dry-run]` | install the systemd path/timer hook (needs sudo) |
+| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | TMC settings from a motor datasheet: `--write`, `--wire-profile`, `--json`, `--selftest` |
+
+### TMC settings: `docs/tmc/` and `scripts/tmc_calc.py`
+
+`docs/tmc/` is never deployed (only `std.configs/**`, `std.macros/**` and the
+profile files are copied) and holds:
+
+- `TMC2209_Calculations.xlsx`, `TMC5160_Calculations.xlsx` — vendor Trinamic/ADI
+  calculators; URLs, date and sha256 are in `docs/tmc/SOURCES.md`;
+- `CALCS.md` — the "sheet/cell → formula → script function" map; project rule:
+  a formula is documented there before it lands in the script;
+- `motors.json` — fleet motor data, every entry requires a datasheet `source`.
+
+`scripts/tmc_calc.py` picks `run_current` and the chopper settings and, by
+default, only prints the resulting stanza:
+
+```bash
+# motor from the database: recommended current and registers
+python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24
+
+# custom motor (current, L and R from the datasheet), several sections
+python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
+    --r-ohm 1.5 --vm 24 --section stepper_z --section stepper_z1
+
+# StealthChop instead of SpreadCycle; PWM_OFS/GRAD from PWM_AUTO after autotuning
+python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
+    --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
+
+# write the module and switch the xy_driver axis to it
+python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
+    --write manta-m5p/xy-tmc5160-17HM19-1684.cfg --wire-profile printers/voron-t
+```
+
+Script rules:
+
+- only `driver_*` keys from a whitelist checked against the installed Klipper are
+  printed (`driver_TPFD` exists on TMC5160 only);
+- current registers (`CS`/`IRUN`, `GLOBALSCALER`) never appear in the config:
+  Klipper derives them from `run_current`, the output shows them for cross-check
+  only;
+- `run_current = min(rating × --i-factor, IC limit)`; a motor whose rating is
+  above the IC limit (e.g. 2.8 A on a TMC2209 with a 0.110 Ohm shunt) is refused
+  with exit status 2;
+- `--write` only writes inside `std.configs/mechanics/tmc/` and refuses to
+  overwrite without `--force`;
+- `--wire-profile` checks the profile `xy_step` (a 1.8 degree motor cannot be
+  wired into an `xy_step=0.9` machine), rewrites `xy_driver` in `machine.conf`
+  and re-renders `profile.cfg`; then run
+  `./scripts/deploy_configs.sh -p <profile> --check`;
+- `--selftest` compares the formulas with the saved xlsx (±1 LSB) and runs the
+  doctest.
+
+`--i-factor 0.8` is a starting point; the fleet's committed `run_current`
+values are lower (0.951 / 0.800 / 0.600 A) because of thermal testing — see the
+comparison in `docs/tmc/CALCS.md`.
 
 ### Flashing controllers
 

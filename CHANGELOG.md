@@ -127,7 +127,47 @@ Every entry is provided in Russian and English.
   run is retried every 10 minutes, and installation stamps the current commit
   as already flashed.
 
+- **RU:** Расчёт параметров TMC для Klipper: `docs/tmc/` (вендорские
+  калькуляторы `TMC2209_Calculations.xlsx`/`TMC5160_Calculations.xlsx`,
+  `CALCS.md` с картой «лист/ячейка → формула», `SOURCES.md` с URL и sha256,
+  `motors.json` с даташитными параметрами моторов парка) и новый
+  `scripts/tmc_calc.py`. Скрипт считает `run_current` и SpreadCycle-параметры
+  (`TOFF`/`TBL`/`HSTRT`/`HEND`, `HystStart_MIN`, предел частоты чоппера), умеет
+  StealthChop с автотюнингом, проверяет мотор по пределу IC и диапазону
+  питания, печатает готовый stanza Klipper, пишет модуль в
+  `std.configs/mechanics/tmc/` (`--write`) и переводит на него ось `xy_driver`
+  (`--wire-profile`). Ключи `driver_*` ограничены белым списком, сверенным с
+  установленным Klipper; регистры тока Klipper считает сам, поэтому в конфиг
+  они не попадают. `--selftest` сверяет формулы с сохранёнными xlsx (±1 LSB).
+  `docs/` в деплой не попадает — проверено `deploy_configs.sh --check`.
+  **EN:** TMC settings for Klipper: a new `docs/tmc/` tree (vendor
+  `TMC2209_Calculations.xlsx`/`TMC5160_Calculations.xlsx` calculators, a
+  `CALCS.md` "sheet/cell → formula" map, `SOURCES.md` with URLs and sha256, and
+  `motors.json` with datasheet motor data) plus `scripts/tmc_calc.py`. The script
+  picks `run_current` and the SpreadCycle values (`TOFF`/`TBL`/`HSTRT`/`HEND`,
+  `HystStart_MIN`, chopper frequency limit), supports StealthChop autotuning,
+  validates the motor against the IC current and supply limits, prints a ready
+  Klipper stanza, writes a module into `std.configs/mechanics/tmc/` (`--write`)
+  and switches the `xy_driver` axis to it (`--wire-profile`). `driver_*` keys are
+  limited to a whitelist checked against the installed Klipper; current registers
+  are derived by Klipper itself, so they never enter the config. `--selftest`
+  compares the formulas with the saved xlsx (±1 LSB). `docs/` is never deployed,
+  verified with `deploy_configs.sh --check`.
+
 ### Changed / Изменено
+
+- **RU:** `render_profile.py` больше не хранит список драйверов X/Y в константе:
+  допустимые значения оси `xy_driver` собираются из файлов
+  `std.configs/mechanics/tmc/<плата>/xy-*.cfg`, которые есть у всех плат
+  семейства. Поведение для текущего парка не изменилось (обе связки на месте,
+  `--stale-check` зелёный), но модуль, созданный `tmc_calc.py`, становится
+  допустимым значением оси без правки скрипта.
+  **EN:** `render_profile.py` no longer keeps the X/Y driver list in a constant:
+  the allowed `xy_driver` values are discovered from
+  `std.configs/mechanics/tmc/<board>/xy-*.cfg` files present for every board
+  family. Fleet behaviour is unchanged (both combinations are found,
+  `--stale-check` is green), but a module created by `tmc_calc.py` becomes a
+  valid axis value without editing the script.
 
 - **RU:** v24: скорости парковки и выравнивания портала удвоены.
   `mechanics/v24.cfg`: `homing_speed` X/Y 25 → 50, Z 8 → 16 и
