@@ -129,6 +129,38 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** `std.macros/homing.cfg` снова рабочий и подключается профилем v24:
+  датчик Z стоит на печатающей головке, поэтому `G28` (когда в запросе есть Z —
+  голый `G28` или `G28 Z`) и `QUAD_GANTRY_LEVEL` обёрнуты температурной
+  проверкой «сопло не горячее 150 °C». Если цель выше 150 °C, она понижается и
+  команда ждёт `M109`; если цель уже ниже, но сопло горячее 155 °C — ждёт
+  `TEMPERATURE_WAIT`. `G28 X Y`/`G28 Y` (в `PRINT_END`, `CANCEL_PRINT`)
+  проверку пропускают. Удалён нерабочий `[homing_override]` с `G1 Z30` и
+  ссылками на несуществующие макро `PARK` (подъём 30 мм теперь делает
+  `[safe_z_home]`); обёртки переименовывают команды на `klippy:connect`, так что
+  `G28.1` идёт через `[safe_z_home]`, а `QUAD_GANTRY_LEVEL.1` — через
+  `[quad_gantry_level]`. `scripts/render_profile.py` добавляет include для
+  модели v24 (после `anchors.cfg`/`machine-extras.cfg`), `printers/v24-350/profile.cfg`
+  перерендерен. `BED_MESH_CALIBRATE` намеренно не обёрнут. Проверено офлайн
+  (`--check`, `check_config.py`); прогон `G28`/`QUAD_GANTRY_LEVEL` — за
+  оператором.
+  **EN:** `std.macros/homing.cfg` works again and is included by the v24
+  profile: the Z probe is mounted on the toolhead, so `G28` (when Z is part of
+  the request — a bare `G28` or `G28 Z`) and `QUAD_GANTRY_LEVEL` are wrapped in
+  a "nozzle not hotter than 150 °C" guard. If the target is above 150 °C it is
+  lowered and the command waits with `M109`; if the target is already lower but
+  the nozzle is hotter than 155 °C, it waits via `TEMPERATURE_WAIT`. `G28 X Y`
+  and `G28 Y` (in `PRINT_END`, `CANCEL_PRINT`) skip the guard. The broken
+  `[homing_override]` with `G1 Z30` and references to the nonexistent `PARK`
+  macro is gone (the 30 mm lift now comes from `[safe_z_home]`); the wrappers
+  rename commands on `klippy:connect`, so `G28.1` goes through `[safe_z_home]`
+  and `QUAD_GANTRY_LEVEL.1` through `[quad_gantry_level]`.
+  `scripts/render_profile.py` adds the include for the v24 model (after
+  `anchors.cfg`/`machine-extras.cfg`) and `printers/v24-350/profile.cfg` is
+  re-rendered. `BED_MESH_CALIBRATE` is deliberately not wrapped. Verified
+  offline (`--check`, `check_config.py`); a `G28`/`QUAD_GANTRY_LEVEL` run is
+  left to the operator.
+
 - **RU:** v24: перед парковкой X/Y портал теперь поднимается на 30 мм вместо
   15. `[safe_z_home]` получил `z_hop: 30` в `geometry/v24-{150,200,250,300,350}.cfg`
   (значение по умолчанию для всей модели) и в `printers/v24-350/anchors.cfg`

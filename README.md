@@ -96,6 +96,19 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
   `ihold=19 irun=19`, то есть в покое моторы держат те же 0.6 А.
 
+Перед парковкой Z и выравниванием стола сопло не должно быть горячее 150 °C
+(датчик Z стоит на печатающей головке): `std.macros/homing.cfg` оборачивает
+`G28` (только когда в запросе есть Z — голый `G28` или `G28 Z`) и
+`QUAD_GANTRY_LEVEL`. Если цель выше 150 °C, она понижается до 150 °C и команда
+ждёт `M109`; если цель уже ниже, но сопло горячее 155 °C, команда ждёт
+остывания через `TEMPERATURE_WAIT`. `G28 X Y` и `G28 Y` (в `PRINT_END`,
+`CANCEL_PRINT`) проверку пропускают и не тормозятся. `BED_MESH_CALIBRATE`
+намеренно не обёрнут — сетка снимается на рабочей температуре. Модуль
+подключается в `profile.cfg` для модели v24; обёртки переименовывают команды на
+`klippy:connect`, поэтому `G28.1` по-прежнему идёт через `[safe_z_home]`
+(подъём 30 мм, зонд в центре стола), а `QUAD_GANTRY_LEVEL.1` — через модуль
+`[quad_gantry_level]`.
+
 Ревизии M8P выбираются осью `board`: `manta-m8p` — V2.0 (STM32H723, 25 МГц,
 USB-CAN-мост), `manta-m8p-v1.0` и `manta-m8p-v1.1` — STM32G0B1, 8 МГц,
 8 КиБ загрузчик. Все три значения используют общие `fans/manta-m8p/`,
@@ -522,6 +535,19 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
 - `hold_current` is not needed for Z: `configfile.settings` shows the inherited
   maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
   motors hold the same 0.6 A.
+
+The nozzle must not be hotter than 150 °C while Z is homed or the gantry is
+levelled (the Z probe is mounted on the toolhead): `std.macros/homing.cfg`
+wraps `G28` (only when Z is part of the request — a bare `G28` or `G28 Z`) and
+`QUAD_GANTRY_LEVEL`. If the target is above 150 °C it is lowered to 150 °C and
+the command waits with `M109`; if the target is already lower but the nozzle is
+hotter than 155 °C, the command waits for cooldown via `TEMPERATURE_WAIT`.
+`G28 X Y` and `G28 Y` (in `PRINT_END`, `CANCEL_PRINT`) skip the check and are
+not delayed. `BED_MESH_CALIBRATE` is deliberately not wrapped — a mesh is taken
+at print temperature. The module is included by `profile.cfg` for the v24
+model; the wrappers rename the commands on `klippy:connect`, so `G28.1` still
+goes through `[safe_z_home]` (30 mm lift, probe at the bed centre) and
+`QUAD_GANTRY_LEVEL.1` through the `[quad_gantry_level]` module.
 
 M8P revisions are selected with the `board` axis: `manta-m8p` is V2.0
 (STM32H723, 25 MHz, USB-CAN bridge), while `manta-m8p-v1.0` and

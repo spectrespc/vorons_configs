@@ -8,7 +8,8 @@ deterministic profile.cfg with a fixed include order:
     macros.cfg
     system.cfg -> board -> toolhead board -> mechanic -> motors -> geometry
     optional subsystems (fixed order) -> extruder -> features
-    std.macros -> anchors.cfg -> machine-extras.cfg
+    std.macros -> anchors.cfg -> machine-extras.cfg -> probe temperature guard
+    (v24)
 
 The generated manifest is committed into the profile and re-rendered by
 deploy_configs.sh, which aborts when the committed copy is stale.
@@ -342,6 +343,11 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
     includes.append("std.macros/test_speed.cfg")
     includes.append("anchors.cfg")
     includes.append("machine-extras.cfg")
+    if model == "v24":
+        # Probe sits on the toolhead: keep the nozzle at or below 150C while Z is
+        # homed and the gantry is levelled.  The module wraps G28/QUAD_GANTRY_LEVEL
+        # on klippy:connect, so it stays effective next to safe_z_home.
+        includes.append("std.macros/homing.cfg")
 
     for path in includes:
         if path in ("macros.cfg", "anchors.cfg", "machine-extras.cfg"):
