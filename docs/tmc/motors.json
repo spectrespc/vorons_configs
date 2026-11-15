@@ -1,0 +1,29 @@
+{
+  "LDO-42STH48-2804AC": {
+    "rated_current_a": 2.8,
+    "inductance_mh": 0.6,
+    "resistance_ohm": 0.7,
+    "step_angle_deg": 1.8,
+    "holding_torque_ncm": 42,
+    "source": "https://ldomotion.com/products/ldo42sth482804ac",
+    "note": "LDO Motion, NEMA 17, 48 mm, dual shaft. Даташит: 2.8 A/фаза, 0.7 Ом, 0.6 мГн (парк — X/Y на 1.8°)"
+  },
+  "17HM19-1684": {
+    "rated_current_a": 1.68,
+    "inductance_mh": 4.1,
+    "resistance_ohm": 1.65,
+    "step_angle_deg": 0.9,
+    "holding_torque_ncm": 44,
+    "source": "https://files.omc-stepperonline.com/17HM19-1684S_Full_Datasheet.pdf",
+    "note": "StepperOnline/OMC 17HM19-1684S, NEMA 17, 48 mm, 0.9°. Даташит: 1.68 A/фаза, 1.65 Ом, 4.10 мГн"
+  },
+  "17HS4401S": {
+    "rated_current_a": 1.7,
+    "inductance_mh": 2.8,
+    "resistance_ohm": 1.5,
+    "step_angle_deg": 1.8,
+    "holding_torque_ncm": 43,
+    "source": "https://www.handsontec.com/dataspecs/17HS4401S.pdf",
+    "note": "Handson Technology 17HS4401S, NEMA 17, 40 mm. Даташит: 1.7 A/фаза, 1.5 Ом, 2.8 мГн (парк — Z)"
+  }
+}
