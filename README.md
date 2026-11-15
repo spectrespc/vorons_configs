@@ -85,9 +85,13 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
   `QUAD_GANTRY_LEVEL` по наклону не меняются, меняется только абсолютное
   «вверх/вниз». `G28 Z` и `QUAD_GANTRY_LEVEL` ещё предстоит прогнать.
 - Парковка и Z=0 — в центре стола: `[safe_z_home]` с
-  `home_xy_position: 175, 175` в `anchors.cfg`, параметры по образцу
-  trident-150 (`speed: 50.0`, `z_hop: 15`, `z_hop_speed: 15.0`).
-  Якоря `quad_gantry_level` и реальные лимиты ещё не замерены.
+  `home_xy_position: 175, 175` в `anchors.cfg`. Правило v24: `G28` поднимает
+  портал на **30 мм** до парковки X/Y (`z_hop: 30`), чтобы низкий или
+  перекошенный портал не протащил сопло по столу; после `G28 Z` портал также
+  остаётся на 30 мм. Значение задано и в `geometry/v24-*.cfg` (по умолчанию для
+  всей модели), профильный `anchors.cfg` его перекрывает. `speed: 50.0`,
+  `z_hop_speed: 15.0`. Якоря `quad_gantry_level` и реальные лимиты ещё не
+  замерены.
 - `hold_current` для Z задавать не нужно: `configfile.settings` показывает
   унаследованный максимум `2.0`, но фактический `IHOLD_IRUN` равен
   `ihold=19 irun=19`, то есть в покое моторы держат те же 0.6 А.
@@ -508,9 +512,13 @@ Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
   `QUAD_GANTRY_LEVEL` tilt behaviour are unchanged; only the absolute up/down
   direction flips. `G28 Z` and `QUAD_GANTRY_LEVEL` still need a run.
 - Parking and Z=0 are at the bed centre: `[safe_z_home]` with
-  `home_xy_position: 175, 175` in `anchors.cfg`, using the trident-150 values
-  (`speed: 50.0`, `z_hop: 15`, `z_hop_speed: 15.0`). The `quad_gantry_level`
-  anchors and the real limits are not measured yet.
+  `home_xy_position: 175, 175` in `anchors.cfg`. The v24 rule: `G28` lifts the
+  gantry by **30 mm** before homing X/Y (`z_hop: 30`), so a low or tilted
+  gantry cannot drag the nozzle across the bed; after `G28 Z` the gantry also
+  stays 30 mm up. The value is also set in `geometry/v24-*.cfg` as the default
+  for the whole model, and the profile `anchors.cfg` overrides it.
+  `speed: 50.0`, `z_hop_speed: 15.0`. The `quad_gantry_level` anchors and the
+  real limits are not measured yet.
 - `hold_current` is not needed for Z: `configfile.settings` shows the inherited
   maximum `2.0`, but the actual `IHOLD_IRUN` is `ihold=19 irun=19`, i.e. the
   motors hold the same 0.6 A.

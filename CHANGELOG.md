@@ -129,6 +129,29 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** v24: перед парковкой X/Y портал теперь поднимается на 30 мм вместо
+  15. `[safe_z_home]` получил `z_hop: 30` в `geometry/v24-{150,200,250,300,350}.cfg`
+  (значение по умолчанию для всей модели) и в `printers/v24-350/anchors.cfg`
+  (перекрывает геометрию; координаты центра стола не менялись). `G28` и
+  `G28 X Y` поднимают портал на 30 мм до поиска X/Y, после `G28 Z` портал
+  также остаётся на 30 мм; `z_hop_speed: 15.0`. Механизм даёт `safe_z_home`
+  (при неотпаркованной Z он «обнуляет» её и поднимает на `z_hop`), отдельный
+  `homing_override` не нужен и с `safe_z_home` несовместим. `mechanics/trident.cfg`
+  и `printers/voron-t/anchors.cfg` не менялись (`z_hop: 15`). Проверено офлайн
+  (`--check`, `--matrix`, `check_config.py`); прогон `G28` — за оператором.
+  **EN:** v24: the gantry now lifts 30 mm instead of 15 before homing X/Y.
+  `[safe_z_home]` gains `z_hop: 30` in
+  `geometry/v24-{150,200,250,300,350}.cfg` (the model-wide default) and in
+  `printers/v24-350/anchors.cfg` (overrides the geometry file; the bed-centre
+  coordinates are unchanged). `G28` and `G28 X Y` lift the gantry by 30 mm
+  before the X/Y search, and after `G28 Z` the gantry also stays 30 mm up;
+  `z_hop_speed: 15.0`. The mechanism is `safe_z_home` (with Z unhomed it zeroes
+  Z and hops by `z_hop`); a separate `homing_override` is not needed and cannot
+  coexist with `safe_z_home`. `mechanics/trident.cfg` and
+  `printers/voron-t/anchors.cfg` are unchanged (`z_hop: 15`). Verified offline
+  (`--check`, `--matrix`, `check_config.py`); the `G28` run is left to the
+  operator.
+
 - **RU:** `mechanics/v24.cfg`: `rotation_distance` осей X и Y исправлен с `32`
   на `40` — у v24 на X/Y стоят шкивы GT2 20T (20 · 2 мм = 40 мм на оборот), а
   не 16T. С `32` любое перемещение выполнялось на 25 % больше заказанного
