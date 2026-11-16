@@ -39,9 +39,14 @@ sha256sum docs/tmc/*.xlsx
 | LDO-42STH48-2804AC | 2.8 A/фаза, 0.7 Ω, 0.6 мГн, 1.8° | <https://ldomotion.com/products/ldo42sth482804ac> |
 | 17HM19-1684 | 1.68 A/фаза, 1.65 Ω, 4.10 мГн, 0.9° | <https://files.omc-stepperonline.com/17HM19-1684S_Full_Datasheet.pdf> |
 | 17HS4401S | 1.7 A/фаза, 1.5 Ω, 2.8 мГн, 1.8° | <https://www.handsontec.com/dataspecs/17HS4401S.pdf> |
+| MOONS-CSE14HRA1L410A-01 | 1.0 A/фаза, 1.9 Ω ±10 %, 1.41 мГн ±20 %, 10 Н·см, 1.8° | <https://biqu.equipment/products/moons-cse14hra1l410a-01-36-stepper-motor> |
 
 Значения в `motors.json` взяты из этих документов; поле `source` у каждой
-записи обязательно и проверяется скриптом при загрузке базы.
+записи обязательно и проверяется скриптом при загрузке базы. Запись
+`MOONS-CSE14HRA1L410A-01` — мотор экструдера HGX 8T (NEMA14, 36 мм, шестерня
+8T); её `rated_current_a` используется `bringup.sh` для `[tmc2209 extruder]` и
+`[tmc2209 extruder_stepper ext-extruder]`. Таблица `motor_by_module` в том же
+файле сопоставляет имя TMC-модуля мотору и проверяется при загрузке.
 
 ## Формулы Klipper (для сверки регистров тока)
 

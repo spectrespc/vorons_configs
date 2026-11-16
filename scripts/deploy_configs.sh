@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Deploy one printer profile from this repository into the live config tree.
 #
-# The fleet axes (size/model/board/xy_step/xy_driver) are read once from
-# printers/<profile>/machine.conf. deploy renders profile.cfg from them, checks
-# that the committed copy is fresh, builds a staging tree, validates it with
-# check_config.py and only then writes to DEST.
+# The fleet axes (size/model/board/kinematics and the X/Y + Z driver pairs) are
+# read once from printers/<profile>/machine.conf. deploy renders profile.cfg
+# from them, checks that the committed copy is fresh, builds a staging tree,
+# validates it with check_config.py and only then writes to DEST.
 #
 # Managed files are overwritten on every deploy. Seed files are created only
 # when missing. printer.cfg is a seed because Klipper's SAVE_CONFIG appends its
@@ -31,7 +31,8 @@ Usage: deploy_configs.sh -p PROFILE [-s SRC] [-d DEST] [-n] [-b]
                          [--check] [--axis KEY=VALUE]... [--no-prune]
 
 Renders profile.cfg from printers/<profile>/machine.conf, validates a staging
-tree with check_config.py, then deploys it.
+tree with check_config.py, then deploys it. machine.conf v2 names the mechanics
+model, kinematics and both TMC pairs explicitly; see docs/PROFILES.md.
 
 Managed (always overwritten):
   profile.cfg, machine.conf, anchors.cfg, machine-extras.cfg,

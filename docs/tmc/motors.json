@@ -25,5 +25,22 @@
     "holding_torque_ncm": 43,
     "source": "https://www.handsontec.com/dataspecs/17HS4401S.pdf",
     "note": "Handson Technology 17HS4401S, NEMA 17, 40 mm. Даташит: 1.7 A/фаза, 1.5 Ом, 2.8 мГн (парк — Z)"
+  },
+  "MOONS-CSE14HRA1L410A-01": {
+    "rated_current_a": 1.0,
+    "inductance_mh": 1.41,
+    "resistance_ohm": 1.9,
+    "step_angle_deg": 1.8,
+    "holding_torque_ncm": 10,
+    "source": "https://biqu.equipment/products/moons-cse14hra1l410a-01-36-stepper-motor",
+    "note": "MOONS' NEMA 14, 36 mm, 8T шестерня (HGX/ProtoXtruder). Даташит: 1.0 A/фаза, 1.9 В, 1.9 Ом ±10 %, 1.41 мГн ±20 %, момент 100 мН·м (10 Н·см), 1.8°. Парк — экструдер HGX 8T"
+  },
+
+  "motor_by_module": {
+    "tmc5160-17hm19-1684": "17HM19-1684",
+    "tmc5160-ldo-42sth48-2804ac": "LDO-42STH48-2804AC",
+    "tmc2209-17hm19-1684": "17HM19-1684",
+    "tmc2109-17hs4401s": "17HS4401S",
+    "tmc2209-17hs4401s": "17HS4401S"
   }
 }

@@ -12,6 +12,159 @@ Every entry is provided in Russian and English.
 
 ### Added / Добавлено
 
+- **RU:** Схема `machine.conf` v2: явные ключи всего железа — `kinematics`,
+  `z_count`, `leveling`, `xy_motor`, `z_driver`, `z_motor`, `e_motor` рядом с
+  `xy_driver` (теперь только микросхема драйвера). `render_profile.py`
+  проверяет согласованность с `model` (`MODEL_PROFILE`), шаг `xy_step` по
+  `docs/tmc/motors.json`, наличие X/Y-модуля в обеих семьях плат и Z-модуля
+  `<z_count>z-<driver>-<motor>.cfg`; при отсутствии пары подсказывает
+  `tmc_calc.py --write`, при старых составных значениях (`xy_driver=tmc5160-…`,
+  `extruder_motor`) выдаёт миграционную ошибку. Добавлены эталонный
+  `scripts/templates/machine.conf.template` с русскими комментариями и
+  `docs/PROFILES.md` (слои профиля, таблица ключей, создание профиля, добавление
+  пары драйвер/мотор, готовые примеры `trident-150` и `v24-350`).
+  `new_machine.sh` генерирует профиль из шаблона и получил флаги `--xy-motor`,
+  `--xy-driver`, `--z-driver`, `--z-motor`, `--e-motor`.
+  **EN:** `machine.conf` schema v2: explicit keys for the whole hardware —
+  `kinematics`, `z_count`, `leveling`, `xy_motor`, `z_driver`, `z_motor`,
+  `e_motor` next to `xy_driver` (now only the driver IC). `render_profile.py`
+  checks consistency with `model` (`MODEL_PROFILE`), the `xy_step` step angle
+  against `docs/tmc/motors.json`, the X/Y module in both board families and the
+  Z module `<z_count>z-<driver>-<motor>.cfg`; a missing pair points to
+  `tmc_calc.py --write`, and the old combined values (`xy_driver=tmc5160-…`,
+  `extruder_motor`) produce an explicit migration error. Added the canonical
+  `scripts/templates/machine.conf.template` with Russian comments and
+  `docs/PROFILES.md` (profile layers, key table, profile creation, adding a
+  driver/motor pair, ready `trident-150` and `v24-350` examples).
+  `new_machine.sh` generates the profile from the template and gained
+  `--xy-motor`, `--xy-driver`, `--z-driver`, `--z-motor`, `--e-motor`.
+
+### Changed / Изменено
+
+- **RU:** `xy_driver` разделён на драйвер+мотор; `extruder_motor` заменён на
+  `e_motor`. Z-модуль больше не включается механикой (`trident.cfg`/`v24.cfg`),
+  а приходит из манифеста `profile.cfg` по ключам профиля; merged-конфиг обоих
+  профилей не изменился. Заголовок `profile.cfg` показывает resolved-карту
+  (`X/Y: … | Z×N: … | E: …`). `tmc_calc.py --wire-profile` пишет
+  `xy_driver`+`xy_motor` двумя строками и проверяет пару до записи;
+  `bringup_tmc.py`/`tmc_tune.py` берут моторы из `xy_motor`/`z_motor`/`e_motor`
+  (парсинг имени модуля и `motor_by_module` для этого не нужны). Профили
+  `voron-t` и `v24-350` мигрированы на схему v2 и перерендерены. Удалён
+  неиспользуемый `mechanics/tmc/xy-tmc2209-17HM19-1684.cfg`: пара без
+  модулей в обеих семьях плат больше не является допустимой.
+  **EN:** `xy_driver` is split into driver+motor; `extruder_motor` became
+  `e_motor`. The Z module is no longer included by the mechanic
+  (`trident.cfg`/`v24.cfg`) but comes from the `profile.cfg` manifest through
+  the profile keys; the merged config of both profiles is unchanged. The
+  `profile.cfg` header shows the resolved map (`X/Y: … | Z×N: … | E: …`).
+  `tmc_calc.py --wire-profile` writes `xy_driver`+`xy_motor` as two lines and
+  validates the pair before writing; `bringup_tmc.py`/`tmc_tune.py` read the
+  motors from `xy_motor`/`z_motor`/`e_motor` (module-name parsing and
+  `motor_by_module` are no longer needed for that). The `voron-t` and
+  `v24-350` profiles are migrated to schema v2 and re-rendered. The unused
+  `mechanics/tmc/xy-tmc2209-17HM19-1684.cfg` is removed: a pair without
+  modules in both board families is no longer valid.
+
+## [1.4.0] - 2026-11-15
+
+### Added / Добавлено
+
+- **RU:** `scripts/bringup.sh` — конвейер первичной настройки машины:
+  `deploy → tmc → motion → pid-e → pid-b → done`. `deploy` развёртывает
+  профиль и перезапускает Klipper через Moonraker, `tmc` пересчитывает все
+  драйверы на номинал мотора (`tmc_calc.py --update-module`, рейлы `vm_xy`/
+  `vm_ze` и `sense_resistor` из живого merged-конфига), `motion` подбирает
+  `max_velocity`/`max_accel` (`tmc_tune.py`), `pid-e`/`pid-b` калибруют
+  экструдер при 250 °C и стол при 120 °C, патчат `printers/<id>/local/pid.cfg`
+  и проверяют удержание 30 с. Состояние (`~/printer_data/.bringup/<id>.json`)
+  позволяет продолжить прогон через `--from`, `--only` и `--skip` выбирают
+  этапы, `--dry-run` печатает план без команд. Гейты S0: чистый `git status`,
+  валидный `machine.conf`, свежий `profile.cfg`, зелёный `deploy --check`,
+  `uuids.cfg` без `REPLACE_WITH_`, отсутствие `TODO` в `anchors.cfg` для
+  `motion`, Klipper `ready`/idle и нагреватели < 45 °C. Хелперы —
+  `scripts/lib/bringup_api.py` (клиент Moonraker на stdlib),
+  `bringup_state.py`, `bringup_tmc.py`, `bringup_pid.py`.
+  **EN:** `scripts/bringup.sh` — machine commissioning pipeline:
+  `deploy → tmc → motion → pid-e → pid-b → done`. `deploy` deploys the profile
+  and restarts Klipper through Moonraker, `tmc` recomputes every driver at the
+  motor nominal (`tmc_calc.py --update-module`, rails `vm_xy`/`vm_ze` and
+  `sense_resistor` read from the live merged config), `motion` searches
+  `max_velocity`/`max_accel` (`tmc_tune.py`), `pid-e`/`pid-b` calibrate the
+  extruder at 250 °C and the bed at 120 °C, patch
+  `printers/<id>/local/pid.cfg` and verify a 30 s hold. The state file
+  (`~/printer_data/.bringup/<id>.json`) allows resuming with `--from`;
+  `--only`/`--skip` select stages and `--dry-run` prints the plan without
+  sending commands. S0 gates: clean `git status`, valid `machine.conf`, fresh
+  `profile.cfg`, green `deploy --check`, `uuids.cfg` without `REPLACE_WITH_`,
+  no `TODO` in `anchors.cfg` for `motion`, Klipper `ready`/idle and heaters
+  < 45 °C. Helpers live in `scripts/lib/bringup_api.py` (stdlib Moonraker
+  client), `bringup_state.py`, `bringup_tmc.py`, `bringup_pid.py`.
+
+- **RU:** `scripts/tmc_tune.py` — подбор `max_velocity`/`max_accel` на
+  номинальном токе: `SET_TMC_CURRENT`/`SET_TMC_FIELD` из `tmc_calc.py`, лестница
+  `TEST_SPEED` (×1.25 до `--max-velocity`/`--max-accel`, по умолчанию ×2 от
+  конфига) и бисекция первого провала, вердикт по дельте MCU-позиций
+  `GET_POSITION` (порог — один полный шаг, 0.5–1 шаг → повтор), дымовой прогон
+  и `TEST_KINEMATICS`, `--apply` пишет модуль и `[printer]` в
+  `machine-extras.cfg`. Все пути восстановления токов и лимитов — в `finally`;
+  Z вживую не тестируется.
+  **EN:** `scripts/tmc_tune.py` — `max_velocity`/`max_accel` search at the
+  nominal current: `SET_TMC_CURRENT`/`SET_TMC_FIELD` from `tmc_calc.py`, a
+  `TEST_SPEED` ladder (×1.25 up to `--max-velocity`/`--max-accel`, default 2×
+  the configured pair) with bisection of the first failure, verdicts from the
+  `GET_POSITION` MCU position delta (one full step threshold, 0.5–1 step means
+  repeat), a smoke run plus `TEST_KINEMATICS`, and `--apply` writing the module
+  and `[printer]` into `machine-extras.cfg`. Current and limit restoration run
+  in `finally`; Z is never tested live.
+
+- **RU:** Два рейла питания драйверов: новые обязательные ключи `machine.conf`
+  `vm_xy` ∈ {48, 55} и `vm_ze` = 24. Пара `board`/`vm_xy` проверяется по
+  таблице `BOARD_VM_XY_MAX` в `render_profile.py` (общая с `check_config.py`):
+  48 В для M5P и M8P V1.0/V1.1, 55 В только для M8P V2.0 (HV-вход 24–60 В).
+  Профили заполнены: `voron-t` 48/24, `v24-350` 55/24; `new_machine.sh`
+  получил `--vm-xy`, `--extruder-motor` и пишет ключи в `machine.conf`.
+  **EN:** Two driver supply rails: new mandatory `machine.conf` keys `vm_xy`
+  ∈ {48, 55} and `vm_ze` = 24. The `board`/`vm_xy` pair is validated through
+  the `BOARD_VM_XY_MAX` table in `render_profile.py` (shared with
+  `check_config.py`): 48 V on the M5P and M8P V1.0/V1.1, 55 V only on the M8P
+  V2.0 (24-60 V HV input). Profiles are filled in: `voron-t` 48/24, `v24-350`
+  55/24; `new_machine.sh` gained `--vm-xy`, `--extruder-motor` and writes the
+  keys into `machine.conf`.
+
+- **RU:** `tmc_calc.py --update-module FILE [--sections a,b]` — пересчёт
+  существующего модуля на месте: `run_current`, `stealthchop_threshold` и
+  `driver_TBL/TOFF/HSTRT/HEND` (в SpreadCycle), с сохранением пинов,
+  транспорта, `sense_resistor`, ручных `driver_*` и порядка опций; блок
+  расчёта с маркерами переписывается идемпотентно, без `--force` печатается
+  diff, режим чоппера берётся из секции. Работает и с `extruder/main.cfg`,
+  `extra-extruder.cfg`.
+  **EN:** `tmc_calc.py --update-module FILE [--sections a,b]` recomputes an
+  existing module in place: `run_current`, `stealthchop_threshold` and
+  `driver_TBL/TOFF/HSTRT/HEND` (SpreadCycle), preserving pins, transport,
+  `sense_resistor`, hand-written `driver_*` and option order; the marked
+  calculation block is rewritten idempotently, without `--force` a diff is
+  printed, and the chopper mode comes from the section. It also works on
+  `extruder/main.cfg` and `extra-extruder.cfg`.
+
+- **RU:** `docs/tmc/motors.json`: запись мотора экструдера
+  `MOONS-CSE14HRA1L410A-01` (NEMA14, 1.0 A, 1.9 Ω, 1.41 мГн, HGX 8T) и
+  таблица `motor_by_module` (имя модуля → мотор); ключ `extruder_motor` в
+  профилях. `render_profile.py` проверяет имя мотора по базе.
+  **EN:** `docs/tmc/motors.json`: the extruder motor entry
+  `MOONS-CSE14HRA1L410A-01` (NEMA14, 1.0 A, 1.9 Ohm, 1.41 mH, HGX 8T) and a
+  `motor_by_module` table (module name → motor); the `extruder_motor` key is
+  set in both profiles. `render_profile.py` validates the motor name against
+  the database.
+
+- **RU:** `std.macros/test_kinematics.cfg` (порт gist alienboyxp) включается в
+  каждый профиль; `scripts/lib/bringup_api.py`, `bringup_state.py`,
+  `bringup_tmc.py`, `bringup_pid.py` — stdlib-хелперы конвейера с офлайн
+  самопроверками.
+  **EN:** `std.macros/test_kinematics.cfg` (ported from the alienboyxp gist)
+  is included by every profile; `scripts/lib/bringup_api.py`,
+  `bringup_state.py`, `bringup_tmc.py`, `bringup_pid.py` are the stdlib
+  pipeline helpers with offline self-tests.
+
 - **RU:** Поддержка ревизий BTT Manta M8P V1.0 и V1.1 как значений оси
   `board`: `manta-m8p-v1.0`, `manta-m8p-v1.1`. Добавлены файлы пинов
   `boards/manta-m8p-v1.0.cfg`/`-v1.1.cfg` (STM32G0B1, 8 МГц, 8 КиБ загрузчик;
@@ -166,6 +319,35 @@ Every entry is provided in Russian and English.
   from the environment.
 
 ### Changed / Изменено
+
+- **RU:** `std.macros/test_speed.cfg` портирован с upstream (v_20250228):
+  `SMALLPATTERNSIZE` читается из `params` (в оригинале голое имя, параметр не
+  работал), добавлен `HEAT=1` (прогрев 150/110 °C, совместим с
+  `_PROBE_TEMP_GUARD`), `M400` перед каждым `GET_POSITION`, а выравнивание
+  портала выбирается по конфигу — `QUAD_GANTRY_LEVEL` на v24 и `Z_TILT_ADJUST`
+  на trident (раньше на v24 вызывался `Z_TILT_ADJUST` и падал).
+  **EN:** `std.macros/test_speed.cfg` was ported from upstream (v_20250228):
+  `SMALLPATTERNSIZE` is read from `params` (upstream reads a bare name, so the
+  parameter never worked), `HEAT=1` preheats to 150/110 °C within the
+  `_PROBE_TEMP_GUARD` limit, every `GET_POSITION` is preceded by `M400`, and
+  gantry levelling follows the config — `QUAD_GANTRY_LEVEL` on v24 and
+  `Z_TILT_ADJUST` on trident (the previous macro called `Z_TILT_ADJUST` on v24
+  and failed).
+
+- **RU:** `new_machine.sh` валидирует пару плата/`vm_xy` через
+  `render_profile.check_voltage` (без дублирования таблицы лимитов) и пишет в
+  `machine.conf` `vm_xy`, `vm_ze`, `extruder_motor`; `--matrix` подставляет
+  48 В для гипотетических машин. Зависимость фич `fans → host` теперь
+  проверяется: `fans/host_fan.cfg` использует пин `host:gpio19`, а `[mcu host]`
+  объявляет только фича `host` (раньше профиль с `features=fans` без `host`
+  создавался и падал на валидации MCU).
+  **EN:** `new_machine.sh` validates the board/`vm_xy` pair through
+  `render_profile.check_voltage` (no duplicated limit table) and writes
+  `vm_xy`, `vm_ze`, `extruder_motor` into `machine.conf`; `--matrix` uses 48 V
+  for hypothetical machines. The `fans → host` feature dependency is now
+  validated: `fans/host_fan.cfg` drives `host:gpio19` while `[mcu host]` is
+  declared only by the `host` feature (a `features=fans` profile without `host`
+  used to be created and then failed the MCU validation).
 
 - **RU:** `render_profile.py` больше не хранит список драйверов X/Y в константе:
   допустимые значения оси `xy_driver` собираются из файлов

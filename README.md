@@ -9,30 +9,50 @@
 
 Профиль машины задаётся один раз в `printers/<id>/machine.conf`. Деплой читает его,
 рендерит `profile.cfg` и валидирует результат; интерактивного выбора при каждом
-деплое нет.
+деплое нет. Полный справочник ключей, правила согласованности и эталон создания
+профиля — [`docs/PROFILES.md`](docs/PROFILES.md).
 
 | Ключ | Значения | Назначение |
 |---|---|---|
 | `size` | `150`, `200`, `250`, `300`, `350` | размер стола, мм |
-| `model` | `trident`, `v24` | 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
-| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | основная плата (по умолчанию: trident → m5p, v24 → m8p) |
-| `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150, иначе `1.8` |
-| `xy_driver` | имя модуля `xy-<имя>.cfg` из `std.configs/mechanics/tmc/<плата>/`, существующего для обеих плат семейства (`tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC`) | драйвер/мотор X/Y; по умолчанию следует за `size` |
+| `model` | `trident`, `v24` | archetype: 3Z винты + `z_tilt` / 4Z ремни + `quad_gantry_level` |
+| `kinematics` | `corexy` | тип кинематики; сверяется с `model` |
+| `z_count` | `3`, `4` | число моторов Z; сверяется с `model` |
+| `leveling` | `z_tilt`, `quad_gantry_level` | выравнивание стола; сверяется с `model` |
+| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | основная плата |
+| `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150; сверяется с мотором |
+| `xy_motor` | ключ из `docs/tmc/motors.json` | мотор X/Y: `17HM19-1684` (0.9°) или `LDO-42STH48-2804AC` (1.8°) |
+| `xy_driver` | `tmc5160`, `tmc2209` | микросхема драйвера X/Y; модуль `xy-<driver>-<motor>.cfg` должен быть в обеих семьях плат |
+| `z_motor` | ключ из `docs/tmc/motors.json` | мотор Z (парк: `17HS4401S`) |
+| `z_driver` | `tmc2109`, `tmc2209` | микросхема драйвера Z; модуль `<z_count>z-<driver>-<motor>.cfg` |
+| `e_motor` | ключ из `docs/tmc/motors.json` | мотор экструдера; драйвер задан платой toolhead |
 | `toolhead` | модуль из `std.configs/boards/` | плата инструментальной головы |
 | `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
+| `vm_xy` | `48` (по умолчанию), `55` | питание драйверов X/Y; 55 В допустимы только на `manta-m8p` (V2.0, HV-вход 24–60 В) |
+| `vm_ze` | `24` | питание Z и обоих экструдеров; другие значения отклоняются |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | подключаемые подсистемы |
 | `frame_w`, `frame_d` | мм | внешняя рама, для проверки якорей |
-| `z_base_measured`, `z_leg_measured` | мм | измеренные стороны треугольника стола |
+| `z_base_measured`, `z_leg_measured` | мм | измеренные стороны треугольника стола (trident) |
 
 Пример `machine.conf`:
 
 ```ini
 size=150
 model=trident
+kinematics=corexy
+z_count=3
+leveling=z_tilt
 board=manta-m5p
 xy_step=0.9
+xy_motor=17HM19-1684
+xy_driver=tmc5160
+z_motor=17HS4401S
+z_driver=tmc2109
+e_motor=MOONS-CSE14HRA1L410A-01
 toolhead=sht36-v3
 head=HGX.8T
+vm_xy=48
+vm_ze=24
 features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
 frame_w=310
 frame_d=310
@@ -44,10 +64,23 @@ z_leg_measured=245
 все остальные размеры — TMC5160 + LDO-42STH48-2804AC (1.8°, 55 Н·см,
 2.8 А/фаза, `run_current: 1.697`). TMC5160 работает в SpreadCycle
 (`stealthchop_threshold: 0`), SPI 1 МГц, `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD =
-0/3/7/8/1/2`. `xy_driver` можно задать явно, но по умолчанию он выбирается по
-`size`, поэтому `--matrix` проверяет обе связки. Новые модули «драйвер+мотор»
-генерирует `scripts/tmc_calc.py` (см. ниже) — после записи модуля для обеих
-плат имя сразу становится допустимым значением `xy_driver`.
+0/3/7/8/1/2`. Пара `xy_driver`+`xy_motor` проверяется по факту модулей в
+`std.configs/mechanics/tmc/manta-m5p/` **и** `.../manta-m8p/`; Z-пара — по
+модулю `<z_count>z-<driver>-<motor>.cfg`. Новые модули генерирует
+`scripts/tmc_calc.py` (см. ниже), а `--wire-profile` записывает ключи
+`xy_driver`/`xy_motor` двумя строками.
+
+Питание драйверов разделено на два рейла: `vm_xy` (X/Y) и `vm_ze` (Z и оба
+экструдера, всегда 24 В). Пары `board`/`vm_xy` проверяют и `render_profile.py`,
+и `check_config.py` по одной таблице `BOARD_VM_XY_MAX`: 48 В для M5P и
+M8P V1.0/V1.1, 55 В только для M8P V2.0 с HV-перемычкой. Профили парка:
+`voron-t` — 48/24, `v24-350` — 55/24.
+
+Заголовок сгенерированного `profile.cfg` показывает resolved-карту железа:
+
+```
+# X/Y: tmc5160+17HM19-1684 @vm_xy=48 | Z×3: tmc2109+17HS4401S @vm_ze=24 | E: tmc2209(sht36-v3)+MOONS-CSE14HRA1L410A-01
+```
 
 TMC5160 X/Y в репозитории разделены по плате: M8P V2.0 использует общий
 **software SPI** на `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) с отдельным
@@ -59,7 +92,8 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 
 Раскладка Z-слотов — свойство конкретной машины. Общий шаблон
 `mechanics/tmc/4z-tmc2209-17hs4401s.cfg` задаёт эталон
-(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`), а профиль может
+(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`); модуль подключается
+манифестом из пары `z_driver`+`z_motor` профиля, а не механикой. Профиль может
 переопределить секции `[stepper_z*]` и `[tmc2209 stepper_z*]` в
 `machine-extras.cfg` (include стоит последним, поэтому значения применяются
 поверх каталога).
@@ -160,6 +194,8 @@ USB-CAN-мост на `PD12`/`PD13`). Стол на v1.x, как и на V2.0, �
 - `belay` и `btt_sfs` физически подключены к SHT42, поэтому требуют
   `extra_extruder`. Нарушение — ERROR в `render_profile.py` и
   `new_machine.sh`, рендер и деплой не выполняются.
+- `fans` требует `host`: `fans/host_fan.cfg` использует пин `host:gpio19`, а
+  `[mcu host]` объявляется только файлом фичи `host`.
 - `local/uuids.cfg`, созданный мастером, содержит `[mcu]` и `[mcu extruder]`
   всегда, а `[mcu ext-extruder]` — только при `extra_extruder`.
 
@@ -275,13 +311,18 @@ git commit -m "Tune voron-t" && git push
   --features fans,display,buttons,host,y_frame
 ```
 
-Мастер создаёт `machine.conf`, seed-заглушку `printer.cfg`, `anchors.cfg` с TODO,
+Мастер генерирует `machine.conf` из эталонного
+`scripts/templates/machine.conf.template` (русские комментарии у каждого
+ключа), создаёт seed-заглушку `printer.cfg`, `anchors.cfg` с TODO,
 `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, рендерит
-`profile.cfg` и валидирует профиль. В интерактивном терминале он спрашивает
-список фич (или принимает `--features`); `belay`/`btt_sfs` без
+`profile.cfg` и валидирует профиль. Пара X/Y и Z-пара по умолчанию берутся по
+правилу парка и archetype; переопределяются флагами `--xy-motor`, `--xy-driver`,
+`--z-driver`, `--z-motor`, `--e-motor`. В интерактивном терминале мастер
+спрашивает список фич (или принимает `--features`); `belay`/`btt_sfs` без
 `extra_extruder` отклоняются. Дальше нужно заполнить `local/uuids.cfg` и
-измеренные якоря. Перед первой калибровкой проверить хост CAN:
-`ip -details link show can0` должен показывать `qlen 1024`, а
+измеренные якоря. Пошаговый сценарий и таблица ключей — в
+[`docs/PROFILES.md`](docs/PROFILES.md). Перед первой калибровкой проверить хост
+CAN: `ip -details link show can0` должен показывать `qlen 1024`, а
 `systemctl status ifup@can0` — не `status=1/FAILURE` (см. «Известные патчи
 Klipper и настройка CAN-хоста»).
 
@@ -298,7 +339,10 @@ Klipper и настройка CAN-хоста»).
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
 | `scripts/update_firmware.sh [-p профиль] [--dry-run] [--auto]` | пересборка и прошивка всех MCU после обновления Klipper |
 | `scripts/install_update_hook.sh [--profile профиль] [--dry-run]` | установка systemd path/timer хука (нужен sudo) |
-| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | расчёт параметров TMC по даташиту мотора: `--write`, `--wire-profile`, `--json`, `--selftest` |
+| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | расчёт параметров TMC по даташиту мотора: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
+| `scripts/tmc_tune.py --profile printers/<id> --run` | подбор `max_velocity`/`max_accel` через `TEST_SPEED`: `--dry-plan`, `--apply`, `--heat`, `--selftest` |
+| `scripts/bringup.sh -p <профиль>` | первичная настройка: `deploy → tmc → motion → pid-e → pid-b → done`, resume через `--from`, проверка плана `--dry-run` |
+| `scripts/lib/bringup_api.py` | клиент Moonraker (stdlib): `info`, `status`, `query`, `gcode`, `store`, `restart`, `wait-ready`, `wait-marker`, `verify-hold` |
 
 ### Расчёт TMC: `docs/tmc/` и `scripts/tmc_calc.py`
 
@@ -327,9 +371,14 @@ python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
 python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
     --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
 
-# записать модуль и перевести ось xy_driver на него
+# записать модуль и прописать пару xy_driver+xy_motor в профиль
 python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
     --write manta-m5p/xy-tmc5160-17HM19-1684.cfg --wire-profile printers/voron-t
+
+# пересчитать уже существующий модуль на месте (номинал, --force для записи)
+python3 scripts/tmc_calc.py --update-module \
+    std.configs/mechanics/tmc/3z-tmc2109-17hs4401s.cfg \
+    --vm 24 --motor 17HS4401S --i-factor 1.0 --force
 ```
 
 Правила скрипта:
@@ -344,14 +393,97 @@ python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
 - `--write` пишет только внутрь `std.configs/mechanics/tmc/`, без `--force`
   существующий файл не перезаписывается;
 - `--wire-profile` проверяет `xy_step` профиля (1.8° мотор в машину с
-  `xy_step=0.9` не проведётся), правит `xy_driver` в `machine.conf` и
+  `xy_step=0.9` не проведётся) и наличие пары в обеих семьях плат, пишет
+  `xy_driver` и `xy_motor` двумя строками в `machine.conf` и
   перегенерирует `profile.cfg`; дальше нужен
   `./scripts/deploy_configs.sh -p <профиль> --check`;
+- `--update-module FILE [--sections a,b]` пересчитывает **существующий** файл:
+  `run_current`, `stealthchop_threshold` и (в SpreadCycle) `driver_TBL/TOFF/
+  HSTRT/HEND`; пины, транспорт (`uart_pin`/`cs_pin`/`spi_*`), `sense_resistor`,
+  ручные `driver_*` вне расчётного набора и порядок опций сохраняются.
+  Комментарии-альтернативы (`#run_current: …`) не трогаются, сверху
+  появляется блок расчёта с маркерами, который переписывается при повторном
+  запуске. Без `--force` печатается diff, файл не меняется. Режим чоппера
+  берётся из секции (`stealthchop_threshold >= 1000` → StealthChop), `--mode`
+  его переопределяет. `--update-module` работает и с `std.configs/extruder/main.cfg`
+  и `std.configs/extra-extruder.cfg`, поэтому для экструдера нужен
+  `e_motor` в `machine.conf`;
+- `motors.json` содержит не только моторы, но и таблицу `motor_by_module`
+  (имя модуля → мотор) — обратная таблица для имён модулей; `bringup.sh`
+  берёт моторы из `xy_motor`/`z_motor`/`e_motor`. Запись
+  экструдера парка — `MOONS-CSE14HRA1L410A-01` (NEMA14, 1.0 A, 1.9 Ω,
+  1.41 мГн, HGX 8T);
+- файл `3z-tmc2109-17hs4401s.cfg` исторически назван `2109`, но содержит
+  секции `[tmc2209 …]`; имя не переименовывается (на него ссылается
+  `mechanics/trident.cfg`), правится только содержимое;
 - `--selftest` сверяет формулы с сохранёнными xlsx (±1 LSB) и прогоняет doctest.
 
 `--i-factor 0.8` — стартовая точка; боевые `run_current` парка ниже (0.951 /
 0.800 / 0.600 A), это результат тепловых испытаний — сверка в
 `docs/tmc/CALCS.md`.
+
+### Первичная настройка машины: `scripts/bringup.sh`
+
+Один прогон на новую машину: **deploy → tmc → motion → pid-e → pid-b → done**.
+Скрипт оркестрирует существующие инструменты и не дублирует их логику.
+
+```bash
+cd ~/vorons_configs
+./scripts/bringup.sh -p voron-t --dry-run     # план без команд и записи
+./scripts/bringup.sh -p voron-t               # полный прогон, оператор у станка
+./scripts/bringup.sh -p voron-t --from pid-e  # продолжить после обрыва
+./scripts/bringup.sh -p voron-t --only tmc    # один этап
+```
+
+| Этап | Что делает |
+|---|---|
+| `deploy` | `deploy_configs.sh -p <id> -b`, затем `POST /machine/restart` и ожидание `ready` (60 с) |
+| `tmc` | `check_config.py --merged` даёт живой список `[tmc*]`; для каждой секции берутся мотор (`xy_motor` / `z_motor` / `e_motor`) и рейл (`vm_xy` для X/Y, `vm_ze` для Z/E), `tmc_calc.py --update-module` переписывает ток и чоппер, затем deploy + restart |
+| `motion` | `tmc_tune.py --run --apply --iterations 2`: лестница `TEST_SPEED`, вердикт по `GET_POSITION`, бисекция, запись пары в `machine-extras.cfg`; требует подтверждения оператора |
+| `pid-e` | `PID_CALIBRATE HEATER=extruder TARGET=250`, разбор `pid_Kp/Ki/Kd` из `gcode_store`, патч `printers/<id>/local/pid.cfg`, deploy + restart, проверка удержания 30 с (±1.5 °C) |
+| `pid-b` | то же для `heater_bed` при 120 °C |
+| `done` | сводка `git diff --stat` и предлагаемое сообщение коммита |
+
+Гейты S0 (без них прогон не стартует): чистый `git status` клона (нужен
+откат), валидный `machine.conf` и свежий `profile.cfg`, зелёный
+`deploy_configs.sh --check`, `std.config.local/uuids.cfg` без `REPLACE_WITH_`,
+`anchors.cfg` без `TODO` для этапа `motion`; Moonraker: Klipper `ready`,
+печать не идёт, нагреватели < 45 °C.
+
+Особенности:
+
+- `SAVE_CONFIG` не используется: PID пишется в git, деплоится и применяется
+  перезапуском Klipper;
+- Z вживую не тестируется (срыв = удар сопла), только пересчитывается на
+  номинал; 1.7 A при пределе TMC2209/0.110 = 1.741 A даёт CS=30/VSENSE=0 —
+  запаса почти нет, это ожидаемо и печатается в отчёте;
+- экструдер на номинале 1.0 A (MOONS, 1.41 мГн) при 24 В в SpreadCycle может
+  дать предупреждение `HystStart > 20`: чоппер работает на пределе
+  рекомендуемого гистерезиса. Это не ошибка расчёта; ручные варианты — `TBL=0`
+  (снижает HystStart примерно до 15) или уменьшение тока, решение за владельцем;
+- состояние (`~/printer_data/.bringup/<id>.json`) хранит последний этап, HEAD
+  и журнал прогонов; после обрыва продолжайте `--from`;
+- после частичного прогона клон изменён: закоммитьте результат (или
+  `git checkout .`) перед следующим запуском — этого требует гейт чистоты;
+- откат: `git -C ~/vorons_configs checkout . &&
+  ./scripts/deploy_configs.sh -p <id> -b` и перезапуск Klipper; коммит, push и
+  тег делает владелец, `bringup.sh` их не выполняет;
+- PID стола 350 при 120 °C близок к `max_temp: 145`; `verify_heater` штатно
+  прервёт runaway, после чего этап завершится ошибкой с выключенными
+  нагревателями.
+
+Проверки без железа:
+
+```bash
+./scripts/bringup.sh -p voron-t --dry-run
+./scripts/bringup.sh -p v24-350 --dry-run
+python3 scripts/lib/bringup_api.py selftest
+python3 scripts/lib/bringup_state.py selftest
+python3 scripts/lib/bringup_pid.py selftest
+python3 scripts/lib/bringup_tmc.py selftest
+python3 scripts/tmc_tune.py --selftest
+python3 scripts/tmc_calc.py --selftest
+```
 
 ### Прошивка контроллеров
 
@@ -589,30 +721,50 @@ deploying one printer profile.
 
 A machine profile is defined once in `printers/<id>/machine.conf`. Deploy reads it,
 renders `profile.cfg` and validates the result; there is no interactive choice on
-every deploy.
+every deploy. The full key reference, consistency rules and the profile creation
+guide live in [`docs/PROFILES.md`](docs/PROFILES.md) (Russian).
 
 | Key | Values | Purpose |
 |---|---|---|
 | `size` | `150`, `200`, `250`, `300`, `350` | bed size, mm |
-| `model` | `trident`, `v24` | 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
-| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | main board (default: trident → m5p, v24 → m8p) |
-| `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm, otherwise `1.8` |
-| `xy_driver` | name of an `xy-<name>.cfg` module from `std.configs/mechanics/tmc/<board>/` that exists for both board families (`tmc5160-17HM19-1684`, `tmc5160-LDO-42STH48-2804AC`) | X/Y driver/motor; follows `size` by default |
+| `model` | `trident`, `v24` | archetype: 3Z leadscrews + `z_tilt` / 4Z belts + `quad_gantry_level` |
+| `kinematics` | `corexy` | kinematics type; must match `model` |
+| `z_count` | `3`, `4` | number of Z motors; must match `model` |
+| `leveling` | `z_tilt`, `quad_gantry_level` | bed levelling; must match `model` |
+| `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | main board |
+| `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm; checked against the motor |
+| `xy_motor` | key of `docs/tmc/motors.json` | X/Y motor: `17HM19-1684` (0.9°) or `LDO-42STH48-2804AC` (1.8°) |
+| `xy_driver` | `tmc5160`, `tmc2209` | X/Y driver IC; `xy-<driver>-<motor>.cfg` must exist in both board families |
+| `z_motor` | key of `docs/tmc/motors.json` | Z motor (fleet: `17HS4401S`) |
+| `z_driver` | `tmc2109`, `tmc2209` | Z driver IC; `<z_count>z-<driver>-<motor>.cfg` |
+| `e_motor` | key of `docs/tmc/motors.json` | extruder motor; its driver is fixed by the toolhead board |
 | `toolhead` | module under `std.configs/boards/` | toolhead board |
 | `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
+| `vm_xy` | `48` (default), `55` | X/Y driver rail; 55 V is legal only on `manta-m8p` (V2.0, HV input 24-60 V) |
+| `vm_ze` | `24` | Z and both extruders; any other value is rejected |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | optional subsystems |
 | `frame_w`, `frame_d` | mm | outer frame, used for anchor sanity checks |
-| `z_base_measured`, `z_leg_measured` | mm | measured bed triangle sides |
+| `z_base_measured`, `z_leg_measured` | mm | measured bed triangle sides (trident) |
 
 Example `machine.conf`:
 
 ```ini
 size=150
 model=trident
+kinematics=corexy
+z_count=3
+leveling=z_tilt
 board=manta-m5p
 xy_step=0.9
+xy_motor=17HM19-1684
+xy_driver=tmc5160
+z_motor=17HS4401S
+z_driver=tmc2109
+e_motor=MOONS-CSE14HRA1L410A-01
 toolhead=sht36-v3
 head=HGX.8T
+vm_xy=48
+vm_ze=24
 features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
 frame_w=310
 frame_d=310
@@ -624,11 +776,24 @@ Fleet rule: only 150x150 uses TMC5160 + 17HM19-1684 (0.9 degree);
 every other size uses TMC5160 + LDO-42STH48-2804AC (1.8 degree, 55 Ncm,
 2.8 A/phase, `run_current: 1.697`). TMC5160 runs in SpreadCycle
 (`stealthchop_threshold: 0`), SPI at 1 MHz, with
-`driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/8/1/2`. `xy_driver` may be set
-explicitly, but by default it follows `size`, so `--matrix` covers both
-combinations. New driver+motor modules are generated by `scripts/tmc_calc.py`
-(see below); once the module exists for both boards, its name is a valid
-`xy_driver` value.
+`driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/8/1/2`. The `xy_driver`+`xy_motor`
+pair is checked against the actual modules in
+`std.configs/mechanics/tmc/manta-m5p/` **and** `.../manta-m8p/`; the Z pair is
+checked through `<z_count>z-<driver>-<motor>.cfg`. New modules are generated by
+`scripts/tmc_calc.py` (see below), and `--wire-profile` writes `xy_driver` and
+`xy_motor` as two lines.
+
+Driver power has two rails: `vm_xy` for X/Y and `vm_ze` for Z and both
+extruders (always 24 V). `render_profile.py` and `check_config.py` validate the
+`board`/`vm_xy` pair through one table, `BOARD_VM_XY_MAX`: 48 V on the M5P and
+M8P V1.0/V1.1, 55 V only on the M8P V2.0 with the HV jumper fitted. Fleet
+profiles: `voron-t` is 48/24, `v24-350` is 55/24.
+
+The generated `profile.cfg` header shows the resolved hardware map:
+
+```
+# X/Y: tmc5160+17HM19-1684 @vm_xy=48 | Z×3: tmc2109+17HS4401S @vm_ze=24 | E: tmc2209(sht36-v3)+MOONS-CSE14HRA1L410A-01
+```
 
 TMC5160 X/Y configs are split by board: the M8P V2.0 uses the shared
 **software SPI** bus on `PG6` (MOSI), `PG7` (MISO), `PG8` (SCLK) with a separate
@@ -640,9 +805,10 @@ and `TH3` cannot be used together.
 
 The Z slot layout is a property of each machine. The shared
 `mechanics/tmc/4z-tmc2209-17hs4401s.cfg` module defines the reference
-(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`), and a profile may override
-the `[stepper_z*]` and `[tmc2209 stepper_z*]` sections in `machine-extras.cfg`
-(the include is last, so its values win over the catalog).
+(`Z0=MOTOR3`, `Z1=MOTOR5`, `Z2=MOTOR6`, `Z3=MOTOR7`); the module is pulled in by
+the manifest from the profile's `z_driver`+`z_motor` pair, not by the mechanic.
+A profile may override the `[stepper_z*]` and `[tmc2209 stepper_z*]` sections in
+`machine-extras.cfg` (the include is last, so its values win over the catalog).
 
 Verified on the test Voron 2.4 350 (CB2 + Manta M8P V2.0, Klipper
 `v0.13.0-816`) on 2026-11-15:
@@ -740,6 +906,8 @@ for the listed features. Fleet machines come with the SHT42 board
 - `belay` and `btt_sfs` are physically wired to the SHT42, so they require
   `extra_extruder`. A violation is an ERROR in `render_profile.py` and
   `new_machine.sh`; rendering and deploy stop.
+- `fans` requires `host`: `fans/host_fan.cfg` drives `host:gpio19`, and
+  `[mcu host]` is only declared by the `host` feature file.
 - The `local/uuids.cfg` created by the wizard always contains `[mcu]` and
   `[mcu extruder]`, and `[mcu ext-extruder]` only with `extra_extruder`.
 
@@ -854,15 +1022,19 @@ git commit -m "Tune voron-t" && git push
   --features fans,display,buttons,host,y_frame
 ```
 
-The wizard creates `machine.conf`, a seed `printer.cfg`, a TODO `anchors.cfg`,
-`machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, renders
-`profile.cfg` and validates the profile. On an interactive terminal it asks for
-the feature list (or accepts `--features`); `belay`/`btt_sfs` without
-`extra_extruder` are rejected. Next, fill `local/uuids.cfg` and the measured
-anchors. Before the first calibration, check the CAN host:
-`ip -details link show can0` must report `qlen 1024`, and
-`systemctl status ifup@can0` must not show `status=1/FAILURE` (see "Known
-Klipper patches and CAN host setup").
+The wizard generates `machine.conf` from the canonical
+`scripts/templates/machine.conf.template` (Russian comments for every key),
+creates a seed `printer.cfg`, a TODO `anchors.cfg`, `machine-extras.cfg`,
+`macros.cfg`, `moonraker.conf`, `local/`, renders `profile.cfg` and validates the
+profile. The X/Y and Z pairs default to the fleet/archetype rule and can be
+overridden with `--xy-motor`, `--xy-driver`, `--z-driver`, `--z-motor`,
+`--e-motor`. On an interactive terminal it asks for the feature list (or accepts
+`--features`); `belay`/`btt_sfs` without `extra_extruder` are rejected. Next,
+fill `local/uuids.cfg` and the measured anchors. The step-by-step guide and the
+key table are in [`docs/PROFILES.md`](docs/PROFILES.md) (Russian). Before the
+first calibration, check the CAN host: `ip -details link show can0` must report
+`qlen 1024`, and `systemctl status ifup@can0` must not show `status=1/FAILURE`
+(see "Known Klipper patches and CAN host setup").
 
 ### Scripts
 
@@ -877,7 +1049,10 @@ Klipper patches and CAN host setup").
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | flash one controller |
 | `scripts/update_firmware.sh [-p profile] [--dry-run] [--auto]` | rebuild and flash all MCUs after a Klipper update |
 | `scripts/install_update_hook.sh [--profile profile] [--dry-run]` | install the systemd path/timer hook (needs sudo) |
-| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | TMC settings from a motor datasheet: `--write`, `--wire-profile`, `--json`, `--selftest` |
+| `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | TMC settings from a motor datasheet: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
+| `scripts/tmc_tune.py --profile printers/<id> --run` | finds `max_velocity`/`max_accel` with `TEST_SPEED`: `--dry-plan`, `--apply`, `--heat`, `--selftest` |
+| `scripts/bringup.sh -p <profile>` | first-run setup: `deploy → tmc → motion → pid-e → pid-b → done`, resume with `--from`, plan with `--dry-run` |
+| `scripts/lib/bringup_api.py` | stdlib Moonraker client: `info`, `status`, `query`, `gcode`, `store`, `restart`, `wait-ready`, `wait-marker`, `verify-hold` |
 
 ### TMC settings: `docs/tmc/` and `scripts/tmc_calc.py`
 
@@ -905,9 +1080,14 @@ python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
 python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
     --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
 
-# write the module and switch the xy_driver axis to it
+# write the module and set the xy_driver+xy_motor pair in the profile
 python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
     --write manta-m5p/xy-tmc5160-17HM19-1684.cfg --wire-profile printers/voron-t
+
+# recompute an existing module in place (nominal current, --force writes it)
+python3 scripts/tmc_calc.py --update-module \
+    std.configs/mechanics/tmc/3z-tmc2109-17hs4401s.cfg \
+    --vm 24 --motor 17HS4401S --i-factor 1.0 --force
 ```
 
 Script rules:
@@ -923,15 +1103,97 @@ Script rules:
 - `--write` only writes inside `std.configs/mechanics/tmc/` and refuses to
   overwrite without `--force`;
 - `--wire-profile` checks the profile `xy_step` (a 1.8 degree motor cannot be
-  wired into an `xy_step=0.9` machine), rewrites `xy_driver` in `machine.conf`
+  wired into an `xy_step=0.9` machine) and that the pair exists in both board
+  families, writes `xy_driver` and `xy_motor` as two lines in `machine.conf`
   and re-renders `profile.cfg`; then run
   `./scripts/deploy_configs.sh -p <profile> --check`;
+- `--update-module FILE [--sections a,b]` recomputes an **existing** file:
+  `run_current`, `stealthchop_threshold` and (in SpreadCycle)
+  `driver_TBL/TOFF/HSTRT/HEND`. Pins, transport (`uart_pin`/`cs_pin`/`spi_*`),
+  `sense_resistor`, hand-written `driver_*` outside the computed set and the
+  option order are preserved. Alternative comments (`#run_current: …`) are left
+  alone and a marked calculation block is added on top and rewritten on the next
+  run. Without `--force` a diff is printed and nothing is written. The chopper
+  mode comes from the section (`stealthchop_threshold >= 1000` means
+  StealthChop); `--mode` overrides it. It also works on
+  `std.configs/extruder/main.cfg` and `std.configs/extra-extruder.cfg`, which is
+  why the extruder needs `e_motor` in `machine.conf`;
+- `motors.json` also holds a `motor_by_module` table (module name → motor), a
+  reverse table for module names; `bringup.sh` reads `xy_motor`/`z_motor`/`e_motor`;
+  it is
+  what `bringup.sh` uses to resolve the Z and X/Y motors. The fleet extruder
+  entry is `MOONS-CSE14HRA1L410A-01` (NEMA14, 1.0 A, 1.9 Ohm, 1.41 mH, HGX 8T);
+- `3z-tmc2109-17hs4401s.cfg` is historically named `2109` but contains
+  `[tmc2209 …]` sections; the name is not changed (`mechanics/trident.cfg`
+  includes it), only its contents are edited;
 - `--selftest` compares the formulas with the saved xlsx (±1 LSB) and runs the
-  doctest.
+  doctest plus the offline `--update-module` cases.
 
 `--i-factor 0.8` is a starting point; the fleet's committed `run_current`
 values are lower (0.951 / 0.800 / 0.600 A) because of thermal testing — see the
 comparison in `docs/tmc/CALCS.md`.
+
+### Machine commissioning: `scripts/bringup.sh`
+
+One run per new machine: **deploy → tmc → motion → pid-e → pid-b → done**.
+The script orchestrates the existing tools and does not duplicate their logic.
+
+```bash
+cd ~/vorons_configs
+./scripts/bringup.sh -p voron-t --dry-run     # plan only, no commands
+./scripts/bringup.sh -p voron-t               # full run, operator at the machine
+./scripts/bringup.sh -p voron-t --from pid-e  # resume after an interruption
+./scripts/bringup.sh -p voron-t --only tmc    # a single stage
+```
+
+| Stage | What it does |
+|---|---|
+| `deploy` | `deploy_configs.sh -p <id> -b`, then `POST /machine/restart` and wait for `ready` (60 s) |
+| `tmc` | `check_config.py --merged` gives the live `[tmc*]` list; each section gets its motor (`xy_motor` / `z_motor` / `e_motor`) and rail (`vm_xy` for X/Y, `vm_ze` for Z/E), `tmc_calc.py --update-module` rewrites current and chopper, then deploy + restart |
+| `motion` | `tmc_tune.py --run --apply --iterations 2`: `TEST_SPEED` ladder, verdict from `GET_POSITION`, bisection, pair written to `machine-extras.cfg`; needs operator confirmation |
+| `pid-e` | `PID_CALIBRATE HEATER=extruder TARGET=250`, parse `pid_Kp/Ki/Kd` from `gcode_store`, patch `printers/<id>/local/pid.cfg`, deploy + restart, verify 30 s of hold (±1.5 °C) |
+| `pid-b` | same for `heater_bed` at 120 °C |
+| `done` | `git diff --stat` summary and a suggested commit message |
+
+S0 gates (a run does not start without them): clean `git status` of the clone
+(the rollback target), valid `machine.conf` and a fresh `profile.cfg`, green
+`deploy_configs.sh --check`, `std.config.local/uuids.cfg` without
+`REPLACE_WITH_`, `anchors.cfg` without `TODO` for the `motion` stage; Moonraker:
+Klipper `ready`, no active print, heaters < 45 °C.
+
+Notes:
+
+- `SAVE_CONFIG` is not used: PID values are committed to git, deployed and
+  applied by a Klipper restart;
+- Z is never tested live (a skip would ram the nozzle), it is only recomputed at
+  the nominal current; 1.7 A against the TMC2209/0.110 limit of 1.741 A gives
+  CS=30/VSENSE=0 with almost no headroom, which is expected and reported;
+- the extruder at its 1.0 A nominal (MOONS, 1.41 mH) on 24 V in SpreadCycle may
+  report `HystStart > 20`: the chopper runs at the edge of the recommended
+  hysteresis. It is not a calculation error; `TBL=0` (about 15) or a lower
+  current are the manual remedies, the owner decides;
+- the state file (`~/printer_data/.bringup/<id>.json`) keeps the last stage,
+  the repository HEAD and a run log; resume with `--from`;
+- a partial run leaves the clone modified: commit the result (or
+  `git checkout .`) before the next run, as required by the cleanliness gate;
+- rollback: `git -C ~/vorons_configs checkout . &&
+  ./scripts/deploy_configs.sh -p <id> -b` and restart Klipper; committing,
+  pushing and tagging are the owner's steps, `bringup.sh` never does them;
+- the 350 bed at 120 °C is close to `max_temp: 145`; `verify_heater` aborts a
+  runaway and the stage then fails with the heaters switched off.
+
+Hardware-free checks:
+
+```bash
+./scripts/bringup.sh -p voron-t --dry-run
+./scripts/bringup.sh -p v24-350 --dry-run
+python3 scripts/lib/bringup_api.py selftest
+python3 scripts/lib/bringup_state.py selftest
+python3 scripts/lib/bringup_pid.py selftest
+python3 scripts/lib/bringup_tmc.py selftest
+python3 scripts/tmc_tune.py --selftest
+python3 scripts/tmc_calc.py --selftest
+```
 
 ### Flashing controllers
 

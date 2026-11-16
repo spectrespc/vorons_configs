@@ -36,6 +36,7 @@ Known limits of this tool:
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import math
 import os
@@ -389,10 +390,113 @@ def selftest() -> int:
                   % (key, value, want, "ok" if ok else "MISMATCH"))
             bad += 0 if ok else 1
     print("selftest: %s" % ("FAILED" if bad else "ok"))
+    update_failures = selftest_update()
+    return 1 if (bad or update_failures) else 0
+
+
+def selftest_update() -> int:
+    """Offline checks for --update-module on in-memory fixtures."""
+    bad = 0
+
+    def check(label: str, ok: bool, detail: str = "") -> None:
+        nonlocal bad
+        print("  %-46s %s%s" % (label, "ok" if ok else "MISMATCH",
+                                "" if ok else "  " + detail))
+        bad += 0 if ok else 1
+
+    motors = load_motors(os.path.join(REPO_ROOT, MOTORS_DB))
+    fixture = (
+        "## historical comment: 17HS19-2004S1\n"
+        "[tmc2209 stepper_z]\n"
+        "uart_pin: UART_2\n"
+        "interpolate: False\n"
+        "run_current: 0.600\n"
+        "#run_current: 0.7\n"
+        "stealthchop_threshold: 999999\n"
+        "driver_TBL: 0\n"
+        "driver_XYZ: 3\n"
+        "\n"
+        "[tmc2209 stepper_z1]\n"
+        "uart_pin: UART_3\n"
+        "run_current: 0.600\n"
+        "sense_resistor: 0.110\n"
+    )
+    args = build_parser().parse_args(
+        ["--vm", "24", "--motor", "17HS4401S", "--i-factor", "1.0",
+         "--update-module", "fixture.cfg"]
+    )
+    first, report = update_module_text(fixture, args, motors)
+    second, report2 = update_module_text(first, args, motors)
+    check("idempotent on a second run", first == second)
+    check("commented alternative preserved", "#run_current: 0.7" in first)
+    check("uart_pin preserved", "uart_pin: UART_2" in first)
+    check("stealthchop kept per section", "stealthchop_threshold: 999999" in first)
+    check("hand-set driver_TBL preserved in StealthChop", "driver_TBL: 0" in first)
+    check("unknown driver key preserved", "driver_XYZ: 3" in first)
+    check("unknown driver key warned",
+          any("driver_xyz" in item for item in report["warnings"]))
+    check("nominal run_current written", "run_current: 1.7" in first)
+    check("hold_current not added",
+          "hold_current" not in first)
+    check("requested sections only",
+          len(report["sections"]) == 2 and len(report2["sections"]) == 2)
+    check("header appears once", first.count(UPDATE_BEGIN) == 1)
+
+    spreadcycle = (
+        "[tmc2209 stepper_z]\n"
+        "uart_pin: UART_2\n"
+        "run_current: 0.6\n"
+        "\n"
+        "# trailing note\n"
+    )
+    third, _ = update_module_text(spreadcycle, args, motors)
+    check("spreadcycle adds chopper keys", "driver_TBL: 2" in third)
+    check("option order kept",
+          third.index("uart_pin: ") < third.index("run_current: ")
+          < third.index("driver_TBL: "))
+    check("tail comment kept", "# trailing note" in third)
+
+    selective = build_parser().parse_args(
+        ["--vm", "24", "--motor", "17HS4401S", "--i-factor", "1.0",
+         "--update-module", "fixture.cfg", "--sections", "stepper_z1"]
+    )
+    fourth, report3 = update_module_text(fixture, selective, motors)
+    check("--sections limits the update",
+          [row["section"] for row in report3["sections"]] == ["[tmc2209 stepper_z1]"])
+    check("unselected section untouched", "run_current: 0.600" in fourth)
+
+    # Regression: a stanza followed by a non-TMC section must not absorb it.
+    mixed = (
+        "[tmc2209 extruder]\n"
+        "uart_pin: extruder:EXT_UART\n"
+        "run_current: 0.55\n"
+        "\n"
+        "[fan]\n"
+        "pin: extruder:FAN1\n"
+        "heater_temp: 50.0\n"
+    )
+    mixed_args = build_parser().parse_args(
+        ["--vm", "24", "--motor", "17HS4401S", "--i-factor", "1.0",
+         "--update-module", "fixture.cfg", "--sections", "extruder"]
+    )
+    fifth, _ = update_module_text(mixed, mixed_args, motors)
+    fan_block = fifth.index("[fan]")
+    check("added keys stay inside the tmc stanza",
+          "stealthchop_threshold: 0" in fifth
+          and fifth.index("stealthchop_threshold: 0") < fan_block)
+    check("non-TMC section untouched", "heater_temp: 50.0" in fifth)
+
+    print("update-module selftest: %s" % ("FAILED" if bad else "ok"))
     return 1 if bad else 0
 
 
 # --- Motor database ------------------------------------------------------
+
+
+# Reserved key: maps a driver-module stem (xy-tmc5160-..., 3z-tmc2109-...,
+# lower case, prefix stripped) to a motor of this database.  It is data, not a
+# motor, so load_motors() validates it separately.
+MODULE_MOTOR_KEY = "motor_by_module"
 
 
 def load_motors(path: str) -> dict[str, dict[str, object]]:
@@ -405,6 +509,15 @@ def load_motors(path: str) -> dict[str, dict[str, object]]:
         raise CalcError("cannot read %s: %s" % (path, exc))
     if not isinstance(data, dict):
         raise CalcError("%s must hold a JSON object" % path)
+    module_map = data.pop(MODULE_MOTOR_KEY, {})
+    if not isinstance(module_map, dict):
+        raise CalcError("%s: %r must be an object" % (path, MODULE_MOTOR_KEY))
+    for module, motor in module_map.items():
+        if not isinstance(motor, str) or motor not in data:
+            raise CalcError(
+                "%s: %r maps to unknown motor %r"
+                % (path, module, motor)
+            )
     for name, entry in data.items():
         if not isinstance(entry, dict):
             raise CalcError("%s: %r must be an object" % (path, name))
@@ -421,6 +534,30 @@ def load_motors(path: str) -> dict[str, dict[str, object]]:
         if not str(entry["source"]).strip():
             raise CalcError("%s: %r needs a datasheet source" % (path, name))
     return data
+
+
+def load_module_map(path: str) -> dict[str, str]:
+    """Read only the motor_by_module table (module stem -> motor name).
+
+    >>> import tempfile, json as _json
+    >>> handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    >>> _ = handle.write(_json.dumps({"motor_by_module": {"tmc2109-17hs4401s": "17HS4401S"}}))
+    >>> handle.close()
+    >>> load_module_map(handle.name)
+    {'tmc2109-17hs4401s': '17HS4401S'}
+    >>> os.unlink(handle.name)
+    """
+    if not os.path.isfile(path):
+        raise CalcError("motor database not found: %s" % path)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise CalcError("cannot read %s: %s" % (path, exc))
+    module_map = data.get(MODULE_MOTOR_KEY, {}) if isinstance(data, dict) else {}
+    if not isinstance(module_map, dict):
+        raise CalcError("%s: %r must be an object" % (path, MODULE_MOTOR_KEY))
+    return {str(module): str(motor) for module, motor in module_map.items()}
 
 
 def motor_module_name(motor: str) -> str:
@@ -782,6 +919,382 @@ def render_text(result: dict[str, object], sections: list[dict[str, object]]) ->
     return "\n".join(out) + "\n"
 
 
+# --- Updating an existing module ----------------------------------------
+
+# Options this mode owns.  Everything else in the file (pins, SPI/UART
+# transport, sense_resistor, diag pins, hand-written driver_* outside this set)
+# is preserved verbatim, together with the option order.
+MANAGED_KEYS = (
+    "run_current",
+    "hold_current",
+    "stealthchop_threshold",
+    "driver_tbl",
+    "driver_toff",
+    "driver_hstrt",
+    "driver_hend",
+)
+CHOPPER_KEYS = ("driver_tbl", "driver_toff", "driver_hstrt", "driver_hend")
+# Klipper option spelling for lines this mode adds (Klipper itself lower-cases
+# every option, but the repository modules use the register names).
+OPTION_SPELLING = {
+    "driver_tbl": "driver_TBL",
+    "driver_toff": "driver_TOFF",
+    "driver_hstrt": "driver_HSTRT",
+    "driver_hend": "driver_HEND",
+}
+
+UPDATE_BEGIN = "# >>> tmc_calc.py --update-module: расчёт (блок обновляется автоматически)"
+UPDATE_END = "# <<< tmc_calc.py: конец блока расчёта"
+SECTION_RE = re.compile(r"^\[(tmc2209|tmc5160)\s+([^\]]+?)\]\s*$")
+ANY_SECTION_RE = re.compile(r"^\[[^\]]+\]\s*$")
+
+
+def split_option(line: str) -> tuple[str, str, str] | None:
+    """Split an active ``key: value  # comment`` line.
+
+    Returns ``(key_lower, value, trailing)`` where ``trailing`` starts with the
+    ``#`` of an inline comment (empty when there is none), or None for blank
+    lines, comments and anything without a colon.
+
+    >>> split_option("run_current: 0.600")
+    ('run_current', '0.600', '')
+    >>> split_option("driver_TBL: 0   # hand-set")
+    ('driver_tbl', '0', '# hand-set')
+    >>> split_option("#run_current: 1.768") is None
+    True
+    >>> split_option("") is None
+    True
+    """
+    stripped = line.lstrip()
+    if not stripped or stripped[0] in "#;" or ":" not in stripped:
+        return None
+    key, _, rest = stripped.partition(":")
+    value, sep, comment = rest.partition("#")
+    # The comment marker belongs to the trailing part: "+ sep + comment" keeps
+    # the spacing the author used.
+    return key.strip().lower(), value.strip(), (sep + comment if sep else "")
+
+
+def rewrite_option(line: str, value: str) -> str:
+    """Replace the value of an option line, keeping key, indent and comment.
+
+    >>> rewrite_option("run_current: 0.600", "0.85")
+    'run_current: 0.85'
+    >>> rewrite_option("  driver_TBL: 2  # vendor", "0")
+    '  driver_TBL: 0  # vendor'
+    """
+    stripped = line.lstrip()
+    indent = line[: len(line) - len(stripped)]
+    key, _, rest = stripped.partition(":")
+    _old, sep, comment = rest.partition("#")
+    space = rest[: len(rest) - len(rest.lstrip())] or " "
+    tail = ("  # " + comment.strip()) if sep else ""
+    return "%s%s:%s%s%s" % (indent, key, space, value, tail)
+
+
+def section_blocks(lines: list[str]) -> list[dict[str, object]]:
+    """Locate ``[tmc<ic> <stepper>]`` blocks.
+
+    A block ends at the next section header of *any* type: a driver stanza in
+    a file that also defines ``[fan]`` or ``[extruder]`` must not swallow those
+    sections when options are appended.
+
+    >>> text = ["[tmc2209 stepper_z]", "run_current: 0.6", "",
+    ...         "[tmc5160 stepper_x]", "run_current: 1", "[fan]", "pin: X"]
+    >>> [(b["driver"], b["name"], b["start"], b["end"]) for b in section_blocks(text)]
+    [('tmc2209', 'stepper_z', 0, 3), ('tmc5160', 'stepper_x', 3, 5)]
+    """
+    headers = [
+        index for index, line in enumerate(lines) if ANY_SECTION_RE.match(line.strip())
+    ]
+    blocks: list[dict[str, object]] = []
+    for position, index in enumerate(headers):
+        match = SECTION_RE.match(lines[index].strip())
+        if not match:
+            continue
+        blocks.append(
+            {
+                "driver": match.group(1),
+                "name": match.group(2).strip(),
+                "start": index,
+                "end": headers[position + 1] if position + 1 < len(headers) else len(lines),
+            }
+        )
+    return blocks
+
+
+def section_mode(threshold: str | None) -> str:
+    """Klipper semantics: a large stealthchop_threshold means StealthChop.
+
+    >>> section_mode("999999"), section_mode("0"), section_mode(None)
+    ('stealthchop', 'spreadcycle', 'spreadcycle')
+    """
+    try:
+        value = float(threshold) if threshold is not None else 0.0
+    except ValueError:
+        return "spreadcycle"
+    return "stealthchop" if value >= 1000 else "spreadcycle"
+
+
+def module_motor(module_stem: str, module_map: dict[str, str]) -> str | None:
+    """Motor of a driver module (lower case, size prefix stripped).
+
+    >>> module_motor("3z-tmc2109-17hs4401s", {"tmc2109-17hs4401s": "17HS4401S"})
+    '17HS4401S'
+    >>> module_motor("xy-tmc5160-LDO-42STH48-2804AC", {"tmc5160-ldo-42sth48-2804ac": "x"})
+    'x'
+    >>> module_motor("unknown", {}) is None
+    True
+    """
+    stem = module_stem.lower()
+    for prefix in ("xy-", "3z-", "4z-"):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+            break
+    return module_map.get(stem)
+
+
+def _section_args(
+    args: argparse.Namespace, driver: str, name: str, rsense: float | None, mode: str
+) -> argparse.Namespace:
+    """Copy of the CLI arguments targeted at one section."""
+    clone = argparse.Namespace(**vars(args))
+    clone.driver = driver
+    clone.section = [name]
+    clone.rsense = rsense
+    clone.mode = mode
+    clone.write = None
+    clone.update_module = None
+    clone.wire_profile = None
+    clone.json = False
+    clone.force = False
+    return clone
+
+
+def _target_values(result: dict[str, object]) -> dict[str, str]:
+    """Option values this mode writes, in canonical order."""
+    values = {"run_current": _fmt(result["run_current"])}
+    if result["hold_current"] is not None:
+        values["hold_current"] = _fmt(result["hold_current"])
+    values["stealthchop_threshold"] = _fmt(result["stealthchop_threshold"])
+    chopper_values = result["chopper"]
+    if chopper_values:
+        values["driver_tbl"] = str(result["tbl"])
+        values["driver_toff"] = str(result["toff"])
+        values["driver_hstrt"] = str(chopper_values["hstrt"])
+        values["driver_hend"] = str(chopper_values["hend"])
+    return values
+
+
+def update_module_text(
+    text: str,
+    args: argparse.Namespace,
+    motors: dict[str, dict[str, object]],
+) -> tuple[str, dict[str, object]]:
+    """Recompute the managed options of every targeted section.
+
+    Returns the new file text and a report with one row per section.  The
+    report is what --json prints and what the bringup stage logs.
+    """
+    lines = text.splitlines()
+    blocks = section_blocks(lines)
+    if not blocks:
+        raise CalcError("no [tmc2209 ...] or [tmc5160 ...] section found")
+    wanted_raw = args.sections
+    if isinstance(wanted_raw, str):
+        wanted_raw = wanted_raw.split(",")
+    wanted = [item.strip().lower() for item in (wanted_raw or []) if item.strip()]
+    targets = []
+    for block in blocks:
+        name = str(block["name"])
+        if wanted and name.lower() not in wanted and name.lower().split()[-1] not in wanted:
+            continue
+        if args.driver and block["driver"] != args.driver:
+            raise CalcError(
+                "[%s %s] is a %s section, but --driver %s was requested"
+                % (block["driver"], name, block["driver"], args.driver)
+            )
+        targets.append(block)
+    if not targets:
+        raise CalcError(
+            "no matching section (found: %s)"
+            % ", ".join(str(block["name"]) for block in blocks)
+        )
+
+    report: dict[str, object] = {
+        "sections": [],
+        "warnings": [],
+        "notes": [],
+        "changed": False,
+    }
+    rows: list[dict[str, object]] = []
+    # Bottom-up: inserting options into one section must not shift the line
+    # numbers of the sections above it.
+    for block in reversed(targets):
+        start, end = int(block["start"]), int(block["end"])
+        body = lines[start + 1:end]
+        active: dict[str, str] = {}
+        for line in body:
+            parsed = split_option(line)
+            if parsed:
+                active[parsed[0]] = parsed[1]
+        driver = str(block["driver"])
+        rsense = active.get("sense_resistor")
+        section_rsense = float(rsense) if rsense else None
+        if args.rsense is not None and section_rsense is not None:
+            if abs(section_rsense - args.rsense) > 1e-9:
+                raise CalcError(
+                    "[%s %s] uses sense_resistor=%s but --rsense=%s was given"
+                    % (driver, block["name"], rsense, _fmt(args.rsense))
+                )
+        mode = args.mode or section_mode(active.get("stealthchop_threshold"))
+        section_args = _section_args(args, driver, str(block["name"]),
+                                     args.rsense or section_rsense, mode)
+        result = calculate(section_args, motors)
+        values = _target_values(result)
+        for warning in result["warnings"]:
+            report["warnings"].append(
+                "[%s %s] %s" % (driver, block["name"], warning)
+            )
+
+        # hold_current is only rewritten when the section already sets it:
+        # adding it would silently lower the holding torque of Z.
+        if "hold_current" not in active:
+            values.pop("hold_current", None)
+            report["notes"].append(
+                "[%s %s] hold_current не задан: Klipper держит током run_current"
+                % (driver, block["name"])
+            )
+        if mode == "stealthchop":
+            for key in CHOPPER_KEYS:
+                if key in active:
+                    report["notes"].append(
+                        "[%s %s] %s сохранён: в StealthChop регистры чоппера не работают"
+                        % (driver, block["name"], key)
+                    )
+            for key in CHOPPER_KEYS:
+                values.pop(key, None)
+        for key in values:
+            if key.startswith("driver_"):
+                field = key[len("driver_"):].upper()
+                if field not in DRIVER_KEYS[driver]:
+                    raise CalcError(
+                        "internal error: %s is not a %s driver key" % (key, driver)
+                    )
+        for key, raw in active.items():
+            if key.startswith("driver_") and key not in MANAGED_KEYS:
+                field = key[len("driver_"):].upper()
+                if field not in DRIVER_KEYS[driver]:
+                    report["warnings"].append(
+                        "[%s %s] неизвестный драйверу ключ %s=%s сохранён как есть"
+                        % (driver, block["name"], key, raw)
+                    )
+                else:
+                    report["notes"].append(
+                        "[%s %s] %s=%s сохранён: не входит в расчёт"
+                        % (driver, block["name"], key, raw)
+                    )
+
+        new_body: list[str] = []
+        seen: set[str] = set()
+        for line in body:
+            parsed = split_option(line)
+            if parsed and parsed[0] in values:
+                new_body.append(rewrite_option(line, values[parsed[0]]))
+                seen.add(parsed[0])
+            else:
+                new_body.append(line)
+        missing = [key for key in values if key not in seen]
+        if missing:
+            insert_at = len(new_body)
+            while insert_at > 0 and not new_body[insert_at - 1].strip():
+                insert_at -= 1
+            last_active = None
+            for index, line in enumerate(new_body[:insert_at]):
+                if split_option(line):
+                    last_active = index
+            insert_at = (last_active + 1) if last_active is not None else 0
+            new_body[insert_at:insert_at] = [
+                "%s: %s" % (OPTION_SPELLING.get(key, key), values[key])
+                for key in missing
+            ]
+        lines[start + 1:end] = new_body
+        rows.append(
+            {
+                "section": "[%s %s]" % (driver, block["name"]),
+                "motor": result["motor"],
+                "vm": result["vm"],
+                "sense_resistor": result["sense_resistor"],
+                "mode": mode,
+                "run_current": result["run_current"],
+                "registers": result["registers"],
+            }
+        )
+    rows.reverse()
+    report["notes"].reverse()
+    report["warnings"].reverse()
+
+    # Replace the managed block (if any) and put the fresh one on top.
+    cleaned: list[str] = []
+    inside = False
+    for line in lines:
+        if line.strip() == UPDATE_BEGIN:
+            inside = True
+            continue
+        if line.strip() == UPDATE_END:
+            inside = False
+            continue
+        if not inside:
+            cleaned.append(line)
+    while cleaned and not cleaned[0].strip():
+        cleaned.pop(0)
+    header = [UPDATE_BEGIN]
+    first = rows[0]
+    header.append(
+        "# %s @ %s V, Rsense=%s Ohm, i_factor=%s"
+        % (first["motor"] or "CLI parameters", _fmt(first["vm"]),
+           _fmt(first["sense_resistor"]), _fmt(args.i_factor))
+    )
+    if args.motor:
+        header.append("# Мотор: %s" % motors[args.motor]["source"])
+    else:
+        header.append("# Мотор: параметры из командной строки")
+    for row in rows:
+        regs = row["registers"]
+        if "cs" in regs:
+            detail = "CS=%d vsense=%d" % (int(regs["cs"]), int(regs["vsense"]))
+        else:
+            detail = "GLOBALSCALER=%d IRUN=%d" % (
+                int(regs["globalscaler"]), int(regs["irun"]))
+        header.append(
+            "#   %s: run_current=%s A RMS, %s, %s"
+            % (row["section"], _fmt(row["run_current"]), detail, row["mode"])
+        )
+    header.append(UPDATE_END)
+    new_text = "\n".join(header + cleaned) + "\n"
+    report["sections"] = rows
+    report["changed"] = new_text != text
+    return new_text, report
+
+
+def write_module_file(path: str, text: str) -> str:
+    """Atomically replace an existing .cfg file, keeping its mode."""
+    target = os.path.realpath(path)
+    if not os.path.isfile(target) or not target.endswith(".cfg"):
+        raise CalcError("--update-module needs an existing .cfg file, got %r" % path)
+    mode = os.stat(target).st_mode & 0o777
+    temporary = "%s.tmp-%d" % (target, os.getpid())
+    try:
+        with open(temporary, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        os.chmod(temporary, mode)
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return target
+
+
 # --- Writing -------------------------------------------------------------
 
 
@@ -802,14 +1315,29 @@ def write_module(path: str, text: str, force: bool) -> str:
     return target
 
 
-def module_driver_name(path: str) -> str:
+def module_xy_pair(path: str) -> tuple[str, str]:
+    """(driver, motor) of an ``xy-<driver>-<motor>.cfg`` module path.
+
+    >>> module_xy_pair("manta-m8p/xy-tmc5160-LDO-42STH48-2804AC.cfg")
+    ('tmc5160', 'LDO-42STH48-2804AC')
+    >>> module_xy_pair("manta-m5p/xy-tmc2209-17HM19-1684.cfg")
+    ('tmc2209', '17HM19-1684')
+    """
     stem = os.path.basename(path)[:-4] if path.endswith(".cfg") else os.path.basename(path)
     if not stem.startswith("xy-"):
         raise CalcError(
             "only xy-*.cfg modules can be wired to the xy_driver axis, got %r"
             % os.path.basename(path)
         )
-    return stem[3:]
+    rest = stem[3:]
+    for driver in sorted(DRIVER_LABELS):
+        prefix = driver + "-"
+        if rest.startswith(prefix):
+            return driver, rest[len(prefix):]
+    raise CalcError(
+        "cannot read the driver from %r: expected xy-<tmc5160|tmc2209>-<motor>.cfg"
+        % os.path.basename(path)
+    )
 
 
 def profile_dir_of(profile: str) -> str:
@@ -849,39 +1377,58 @@ def ensure_step_angle(profile: str, step_angle: object) -> None:
         )
 
 
-def wire_profile(profile: str, driver_name: str, step_angle: object = None) -> str:
+def validate_wire_pair(profile: str, driver: str, motor: str) -> None:
+    """Refuse a pair the profile cannot render (module missing, wrong step...)."""
     profile_dir = profile_dir_of(profile)
     conf = os.path.join(profile_dir, "machine.conf")
-    ensure_step_angle(profile, step_angle)
-
     render = os.path.join(REPO_ROOT, "scripts", "render_profile.py")
     sys.path.insert(0, os.path.dirname(render))
     try:
         import render_profile  # noqa: WPS433 - sibling script, loaded on demand
     finally:
         sys.path.pop(0)
-    if driver_name not in render_profile.XY_DRIVERS:
-        raise CalcError(
-            "xy_driver=%s is unknown to render_profile.py (allowed: %s)"
-            % (driver_name, ", ".join(render_profile.XY_DRIVERS))
-        )
+    try:
+        values = render_profile.parse_machine_conf(conf)
+        values["xy_driver"] = driver
+        values["xy_motor"] = motor
+        render_profile.validate(values)
+    except (render_profile.ProfileError, ValueError) as exc:
+        raise CalcError("cannot wire %s+%s: %s" % (driver, motor, exc))
+
+
+def wire_profile(
+    profile: str, driver: str, motor: str, step_angle: object = None
+) -> str:
+    """Write ``xy_driver`` and ``xy_motor`` into machine.conf, then re-render.
+
+    The profile is validated before anything is written: a pair without a
+    module for both board families is refused, so the profile cannot be left
+    pointing at a module that does not exist.
+    """
+    profile_dir = profile_dir_of(profile)
+    conf = os.path.join(profile_dir, "machine.conf")
+    ensure_step_angle(profile, step_angle)
+    validate_wire_pair(profile, driver, motor)
+
+    render = os.path.join(REPO_ROOT, "scripts", "render_profile.py")
 
     with open(conf, "r", encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-    replaced = False
+    wanted = {"xy_driver": driver, "xy_motor": motor}
     for index, line in enumerate(lines):
-        if line.strip().startswith("xy_driver="):
-            lines[index] = "xy_driver=%s" % driver_name
-            replaced = True
-            break
-    if not replaced:
+        key = line.split("=", 1)[0].strip()
+        if key in wanted and "=" in line:
+            lines[index] = "%s=%s" % (key, wanted.pop(key))
+    missing = [key for key in ("xy_motor", "xy_driver") if key in wanted]
+    if missing:
+        insert_at = len(lines)
         for index, line in enumerate(lines):
             if line.strip().startswith("xy_step="):
-                lines.insert(index + 1, "xy_driver=%s" % driver_name)
-                replaced = True
+                insert_at = index + 1
                 break
-    if not replaced:
-        lines.append("xy_driver=%s" % driver_name)
+        lines[insert_at:insert_at] = [
+            "%s=%s" % (key, wanted[key]) for key in missing
+        ]
     with open(conf, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -896,14 +1443,80 @@ def wire_profile(profile: str, driver_name: str, step_angle: object = None) -> s
         )
     rel = os.path.relpath(profile_dir, REPO_ROOT)
     return (
-        "%s: xy_driver=%s\n"
+        "%s: xy_driver=%s xy_motor=%s\n"
         "%s/profile.cfg перегенерирован. Проверка:\n"
         "  ./scripts/deploy_configs.sh -p %s --check"
-        % (os.path.join(rel, "machine.conf"), driver_name, rel, os.path.basename(rel))
+        % (os.path.join(rel, "machine.conf"), driver, motor, rel, os.path.basename(rel))
     )
 
 
 # --- CLI -----------------------------------------------------------------
+
+
+def run_update_module(args: argparse.Namespace) -> int:
+    """--update-module: recompute a module in place (or show the diff)."""
+    if args.vm is None:
+        print("ERROR: --update-module requires --vm", file=sys.stderr)
+        return 2
+    if args.sections:
+        args.sections = [item.strip() for item in args.sections.split(",") if item.strip()]
+    try:
+        with open(args.update_module, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        print("ERROR: cannot read %s: %s" % (args.update_module, exc), file=sys.stderr)
+        return 2
+    try:
+        motors = load_motors(args.motors_db)
+        new_text, report = update_module_text(text, args, motors)
+        changed = bool(report["changed"])
+        written = None
+        if changed and args.force:
+            written = write_module_file(args.update_module, new_text)
+    except CalcError as exc:
+        print("ERROR: %s" % exc, file=sys.stderr)
+        return 2
+
+    if args.json:
+        report["module"] = args.update_module
+        report["written"] = bool(written)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        diff_stream = sys.stderr
+    else:
+        diff_stream = sys.stdout
+        print("модуль: %s" % args.update_module)
+        for row in report["sections"]:
+            regs = row["registers"]
+            detail = (
+                "CS=%d vsense=%d" % (int(regs["cs"]), int(regs["vsense"]))
+                if "cs" in regs
+                else "GLOBALSCALER=%d IRUN=%d"
+                % (int(regs["globalscaler"]), int(regs["irun"]))
+            )
+            print(
+                "  %s: run_current=%s A RMS (%s, %s)"
+                % (row["section"], _fmt(row["run_current"]), detail, row["mode"])
+            )
+        for note in report["notes"]:
+            print("  примечание: %s" % note)
+        for warning in report["warnings"]:
+            print("  ВНИМАНИЕ: %s" % warning)
+        if written:
+            print("записан модуль: %s" % os.path.relpath(written, os.getcwd()))
+        elif changed:
+            print("DRY-RUN: изменения не записаны (добавьте --force)")
+        else:
+            print("изменений нет")
+
+    if changed and not args.json:
+        diff = difflib.unified_diff(
+            text.splitlines(), new_text.splitlines(),
+            fromfile=args.update_module, tofile=args.update_module + " (new)",
+            lineterm="",
+        )
+        for line in diff:
+            diff_stream.write(line + "\n")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -933,7 +1546,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--i-factor", type=float, default=0.8,
                         help="доля номинального тока (по умолчанию 0.8)")
     parser.add_argument("--mode", choices=("spreadcycle", "stealthchop"),
-                        default="spreadcycle", help="режим чоппера (по умолчанию spreadcycle)")
+                        help="режим чоппера (по умолчанию spreadcycle; "
+                             "--update-module без флага сохраняет режим каждой секции)")
     parser.add_argument("--hold-frac", type=float, default=0.5,
                         help="hold_current = run_current x доля; 0 — не печатать")
     parser.add_argument("--stealthchop-threshold", type=float,
@@ -960,7 +1574,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="записать модуль в std.configs/mechanics/tmc/ (путь относительно)")
     parser.add_argument("--force", action="store_true", help="перезаписать существующий модуль")
     parser.add_argument("--wire-profile", metavar="DIR",
-                        help="прописать xy_driver в printers/<id>/machine.conf и перегенерировать profile.cfg")
+                        help="прописать xy_driver+xy_motor в printers/<id>/machine.conf и перегенерировать profile.cfg")
+    parser.add_argument("--update-module", metavar="FILE",
+                        help="пересчитать параметры в существующем модуле (.cfg) на месте, "
+                             "сохранив пины и порядок опций")
+    parser.add_argument("--sections", metavar="A,B",
+                        help="секции для --update-module (по умолчанию все в файле)")
     parser.add_argument("--list-motors", action="store_true", help="список моторов в базе")
     parser.add_argument("--selftest", action="store_true",
                         help="сверить формулы с docs/tmc/*.xlsx и прогнать doctest")
@@ -988,6 +1607,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest()
+    if args.update_module:
+        return run_update_module(args)
     if args.list_motors:
         try:
             motors = load_motors(args.motors_db)
@@ -1007,6 +1628,8 @@ def main(argv: list[str] | None = None) -> int:
                if value is None]
     if missing:
         parser.error("required: %s" % ", ".join(missing))
+    if args.mode is None:
+        args.mode = "spreadcycle"
 
     if args.pins:
         args.pins = [item.strip() for item in args.pins.split(",") if item.strip()]
@@ -1030,10 +1653,18 @@ def main(argv: list[str] | None = None) -> int:
         step_angle = result["step_angle"]
         sections = render_sections(result, args)
         text = render_text(result, sections)
+        wire_pair: tuple[str, str] | None = None
         if args.wire_profile:
             # Validate the profile before writing anything: a refused wiring must
             # not leave a module the machine cannot use.
+            wire_pair = module_xy_pair(args.write)
+            if result["motor"] and result["motor"] != wire_pair[1]:
+                raise CalcError(
+                    "--write names motor %s, but --motor %s was calculated"
+                    % (wire_pair[1], result["motor"])
+                )
             ensure_step_angle(args.wire_profile, result["step_angle"])
+            validate_wire_pair(args.wire_profile, wire_pair[0], wire_pair[1])
         written = None
         if args.write:
             written = write_module(args.write, text, args.force)
@@ -1047,12 +1678,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(text)
     if written:
         print("записан модуль: %s" % os.path.relpath(written, REPO_ROOT), file=sys.stderr)
-    if args.wire_profile:
+    if args.wire_profile and wire_pair is not None:
         try:
+            driver, motor = wire_pair
             print(
-                wire_profile(
-                    args.wire_profile, module_driver_name(args.write), step_angle
-                ),
+                wire_profile(args.wire_profile, driver, motor, step_angle),
                 file=sys.stderr,
             )
         except CalcError as exc:

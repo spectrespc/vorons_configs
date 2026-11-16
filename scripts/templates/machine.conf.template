@@ -1,0 +1,80 @@
+# Эталон machine.conf — единственный источник выбора железа профиля.
+# Файл генерирует scripts/new_machine.sh из scripts/templates/machine.conf.template.
+# Схема v2: все ключи обязательны (кроме toolhead/head/features и измеряемых
+# anchors). Подробное описание каждого ключа и проверок: docs/PROFILES.md.
+
+# size — размер стола, мм. Допустимо: 150, 200, 250, 300, 350.
+# Проверяется render_profile.py (SIZES) и наличием geometry/<model>-<size>.cfg.
+size=@SIZE@
+
+# model — archetype механики: trident | v24. Выбирает mechanics/<model>.cfg,
+# geometry/<model>-<size>.cfg и согласованный набор Z.
+model=@MODEL@
+
+# kinematics — тип кинематики. Для trident и v24: corexy. Сверяется с model.
+kinematics=@KINEMATICS@
+
+# z_count — число моторов Z. trident = 3, v24 = 4. Сверяется с model.
+z_count=@Z_COUNT@
+
+# leveling — выравнивание стола. trident = z_tilt, v24 = quad_gantry_level.
+# Сверяется с model.
+leveling=@LEVELING@
+
+# board — основная плата: manta-m5p | manta-m8p | manta-m8p-v1.0 |
+# manta-m8p-v1.1. Ревизии M8P различаются только пинами и CAN-трансивером.
+board=@BOARD@
+
+# xy_step — шаг моторов X/Y в градусах: 0.9 (только 150 мм) или 1.8.
+# Должен совпадать с step_angle_deg мотора xy_motor в docs/tmc/motors.json.
+xy_step=@XY_STEP@
+
+# xy_motor — ключ мотора X/Y из docs/tmc/motors.json
+# (17HM19-1684 для 0.9°, LDO-42STH48-2804AC для 1.8°).
+xy_motor=@XY_MOTOR@
+
+# xy_driver — микросхема драйвера X/Y: tmc5160 | tmc2209.
+# Модуль: std.configs/mechanics/tmc/<семейство платы>/xy-<xy_driver>-<xy_motor>.cfg
+# и он обязан существовать для обеих семейств (manta-m5p и manta-m8p).
+xy_driver=@XY_DRIVER@
+
+# z_motor — ключ мотора Z из docs/tmc/motors.json (парк: 17HS4401S).
+z_motor=@Z_MOTOR@
+
+# z_driver — микросхема драйвера Z: trident = tmc2109 (драйверы M5P, в Klipper
+# как tmc2209), v24 = tmc2209.
+# Модуль: std.configs/mechanics/tmc/<z_count>z-<z_driver>-<z_motor>.cfg
+z_driver=@Z_DRIVER@
+
+# e_motor — ключ мотора экструдера из docs/tmc/motors.json
+# (HGX 8T: MOONS-CSE14HRA1L410A-01). Драйвер экструдера задан платой toolhead,
+# отдельного ключа нет, чтобы профиль не разъезжался с железом.
+e_motor=@E_MOTOR@
+
+# toolhead — плата toolhead: sht36-v3. Пустое значение — без отдельной платы.
+toolhead=@TOOLHEAD@
+
+# head — модуль экструдера/хотэнда: HGX.8T. Пустое значение — без head-модуля.
+head=@HEAD@
+
+# vm_xy — рейл питания драйверов X/Y: 48 | 55. 55 В допустимы только на
+# manta-m8p (V2.0, HV-вход 24–60 В); проверяется BOARD_VM_XY_MAX.
+vm_xy=@VM_XY@
+
+# vm_ze — рейл питания Z и обоих экструдеров: всегда 24 В (проверяется).
+vm_ze=@VM_ZE@
+
+# frame_w / frame_d — внешние габариты рамы, мм. По умолчанию size + 160.
+# check_config.py сверяет с ними размах z_positions.
+frame_w=@FRAME_W@
+frame_d=@FRAME_D@
+
+# features — дополнительные модули через запятую: fans,display,buttons,belay,
+# btt_sfs,runout,extra_extruder,host,y_frame,eddy.
+# belay и btt_sfs требуют extra_extruder; fans требует host.
+features=@FEATURES@
+
+# Измеряемые anchors (только trident): база и нога стола, мм. Раскомментируйте
+# после замера — check_config.py сверит их с z_positions из anchors.cfg.
+# z_base_measured=227
+# z_leg_measured=245

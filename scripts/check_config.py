@@ -104,6 +104,20 @@ def _norm(path: str) -> str:
     return path.replace(os.sep, "/")
 
 
+def _render_profile_module():
+    """Import the sibling renderer (single source of the machine.conf rules)."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    try:
+        import render_profile  # noqa: PLC0415 - same-directory helper
+    except ImportError:
+        # A deployed copy of this checker may live without the renderer next to
+        # it; the voltage check is then skipped instead of crashing.
+        return None
+    return render_profile
+
+
 def is_catalog_module(path: str) -> bool:
     norm = _norm(os.path.abspath(path))
     return any("/%s" % prefix in norm + "/" for prefix in CATALOG_PREFIXES)
@@ -427,6 +441,40 @@ class Checker:
         except OSError as exc:
             self.warning("geometry: cannot read machine.conf %s: %s" % (path, exc))
         return values
+
+    def check_machine_voltage(self, machine_conf: str | None) -> None:
+        """Validate vm_xy/vm_ze from machine.conf with render_profile's rules.
+
+        The machine.conf parser and the board limit table live in
+        render_profile.py, so this check cannot drift from the renderer.
+        """
+        if not machine_conf or not os.path.isfile(machine_conf):
+            return
+        values: dict[str, str] = {}
+        try:
+            with open(machine_conf, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip()
+        except OSError as exc:
+            self.warning("voltage: cannot read machine.conf %s: %s" % (machine_conf, exc))
+            return
+        render_profile = _render_profile_module()
+        if render_profile is None:
+            return
+        model = values.get("model")
+        board = values.get("board") or (
+            render_profile.DEFAULT_BOARD.get(model) if model else None
+        )
+        if not board:
+            return
+        try:
+            render_profile.check_voltage(values, board)
+        except render_profile.ProfileError as exc:
+            self.error("voltage: %s" % exc)
 
     def check_geometry(self, machine_conf: str | None) -> None:
         cfg = self.fileconfig
@@ -810,6 +858,7 @@ def run_checks(
         checker = Checker()
         checker.parse_file(filename, include_dirs, local_dir)
         checker.check_geometry(machine_conf)
+        checker.check_machine_voltage(machine_conf)
         checker.check_mcu_references()
         checker.emit(stream=sys.stdout)
         had_errors = had_errors or bool(checker.errors)
