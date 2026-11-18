@@ -260,6 +260,11 @@ features=...,eddy_f
   `PROBE_EDDY_CURRENT_CALIBRATE`; макросы
   `_LDC_CALIBRATE_DRIVE_CURRENT`/`PROBE_EDDY_CURRENT_CALIBRATE_AUTO` из
   документации Mellow оператор добавляет временно.
+- Справочные значения взяты из документации Mellow «Использование EDDY»
+  (FLY-SHT36 V3, `mellow.klipper.cn`): `i2c_speed: 4000000`,
+  `frequency: 40000000` (кварц 40 МГц) и `descend_z: 2.5` при катушке в 2–3 мм
+  над соплом; там же таблица адресов — внешний FLY-EDDY на V3/Plus V3 это
+  `42`, встроенный LDC1612 у SHT36 Max V3 — `43`.
 - Шлейф FPC подключать только при снятом питании платы.
 
 #### Гибрид: концевик для Z, eddy для QGL/bed_mesh
@@ -1153,6 +1158,11 @@ features=...,eddy_f
   `LDC_CALIBRATE_DRIVE_CURRENT` and `PROBE_EDDY_CURRENT_CALIBRATE`; the
   `_LDC_CALIBRATE_DRIVE_CURRENT`/`PROBE_EDDY_CURRENT_CALIBRATE_AUTO` macros from
   the Mellow documentation are added temporarily by the operator.
+- The reference values come from the Mellow "EDDY usage" page (FLY-SHT36 V3,
+  `mellow.klipper.cn`): `i2c_speed: 4000000`, `frequency: 40000000` (40 MHz
+  crystal) and `descend_z: 2.5` with the coil 2-3 mm above the nozzle; the same
+  page has the address table - an external FLY-EDDY on V3/Plus V3 is `42`, the
+  built-in LDC1612 of SHT36 Max V3 is `43`.
 - Connect the FPC harness only with the board powered off.
 
 #### Hybrid: switch for Z, eddy for QGL/bed_mesh
