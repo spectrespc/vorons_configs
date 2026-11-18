@@ -291,6 +291,17 @@ autosave на стенде (`printer.cfg`), в git не попадают:
    (частота по высоте);
 2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика.
 
+Калибровать eddy нужно с `ACCEPT` на 0.3–0.5 мм выше соприкосновения сопла:
+если катушка стоит низко над соплом (≈1 мм), точка контакта попадает в
+плоский участок отклика, где шаг 40 мкм даёт ~300 Гц при шуме ~400 Гц — Klipper
+пишет `Frequency too noisy ... Failed calibration - No usable data`. Тот же
+щуп с `ACCEPT` на 0.5 мм выше даёт ~5.4 кГц на 40 мкм, диапазон частот
+~277 кГц и шум ~1 мкм (стенд v24-350, 2026-11-18). Поэтому либо катушку
+ставят в рекомендованные 2–3 мм над соплом, либо калибруют от приподнятого
+положения, а нуль сводят со столом отдельно: `Z_ENDSTOP_CALIBRATE` задаёт
+Z=0 по бумаге, после чего расхождение `PROBE` с нулём убирают
+`Z_OFFSET_APPLY_PROBE`.
+
 Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
 должна дать ≈ 0 (± 0.02 мм); расхождение означает, что одна из калибровок
 неверна.
@@ -860,11 +871,14 @@ Klipper, прошивает платы, запускает Klipper и запис
   включён в коммитнутом профиле и загружается на стенде (2026-11-18: `probe` —
   это `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` видит `stepper_z`,
   LDC1612 отвечает по адресу `43`, в логе нет `Registering duplicate object` и
-  `Timer too close`), но калибровки и прогоны QGL/mesh ещё не выполнены: до
-  `PROBE_EDDY_CURRENT_CALIBRATE` щуп не откалиброван, а `position_endstop`
-  остаётся плейсхолдером. `check_config.py` ловит обе типовые ошибки такой
-  сборки — `[probe]` вместе с `[probe_eddy_current]` и физический
-  `endstop_pin` у `[stepper_z]` без `position_endstop`.
+  `Timer too close`). Таблица `calibrate` eddy снята на стенде (диапазон
+  ~277 кГц, шум ~1 мкм при 1–3 мм) и сохранена в autosave, но нуль eddy ещё не
+  сведён со столом: `position_endstop` остаётся плейсхолдером до
+  `Z_ENDSTOP_CALIBRATE`, после чего расхождение убирается
+  `Z_OFFSET_APPLY_PROBE`; прогоны QGL/mesh и первый слой — за оператором.
+  `check_config.py` ловит обе типовые ошибки такой сборки — `[probe]` вместе с
+  `[probe_eddy_current]` и физический `endstop_pin` у `[stepper_z]` без
+  `position_endstop`.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -1169,6 +1183,16 @@ only in the bench autosave (`printer.cfg`) and are never committed:
 1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the `calibrate`
    frequency table;
 2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`.
+
+Calibrate the eddy with `ACCEPT` 0.3-0.5 mm above nozzle contact: when the coil
+sits low over the nozzle (about 1 mm), the contact point lands in the flat part
+of the response where a 40 um step gives ~300 Hz against ~400 Hz of noise, and
+Klipper answers `Frequency too noisy ... Failed calibration - No usable data`.
+The same sensor accepted 0.5 mm higher gives ~5.4 kHz per 40 um, a ~277 kHz
+frequency span and ~1 um of noise (v24-350 bench, 2026-11-18). So either mount
+the coil at the recommended 2-3 mm above the nozzle, or calibrate from a raised
+position and set the zero separately: `Z_ENDSTOP_CALIBRATE` defines Z=0 on
+paper, then the `PROBE` difference is removed with `Z_OFFSET_APPLY_PROBE`.
 
 Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
 at the bed centre must read about 0 (+/- 0.02 mm); a difference means one of
@@ -1741,11 +1765,13 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   enabled in the committed profile and loads on the bench (2026-11-18: `probe`
   is `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` reports `stepper_z`,
   the LDC1612 answers at address `43`, and the log has no
-  `Registering duplicate object` or `Timer too close`), but the calibrations
-  and the QGL/mesh runs are still pending: before
-  `PROBE_EDDY_CURRENT_CALIBRATE` the sensor is uncalibrated and
-  `position_endstop` is a placeholder. `check_config.py` now catches the two
-  typical mistakes of such a build: `[probe]` together with
+  `Registering duplicate object` or `Timer too close`). The eddy `calibrate`
+  table is measured on the bench (~277 kHz span, ~1 um of noise at 1-3 mm) and
+  stored in the autosave, but the eddy zero is not yet matched to the bed:
+  `position_endstop` stays a placeholder until `Z_ENDSTOP_CALIBRATE`, after
+  which the difference is removed with `Z_OFFSET_APPLY_PROBE`; the QGL/mesh
+  runs and the first layer are still with the operator. `check_config.py` now
+  catches the two typical mistakes of such a build: `[probe]` together with
   `[probe_eddy_current]`, and a physical `[stepper_z] endstop_pin` without
   `position_endstop`.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
