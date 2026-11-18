@@ -39,6 +39,55 @@ Every entry is provided in Russian and English.
   `new_machine.sh` generates the profile from the template and gained
   `--xy-motor`, `--xy-driver`, `--z-driver`, `--z-motor`, `--e-motor`.
 
+- **RU:** Новая опция профиля `eddy_f`: внешний вихретоковый щуп FLY-EDDY со
+  шлейфом EDDY-F в разъёме EDDY платы SHT36 V3 / Plus V3 (аппаратный I2C
+  `i2c1e`, LDC1612 по адресу `42`, датчик температуры на `extruder:gpio28`).
+  Модуль `std.configs/sht36-v3.eddy-f.cfg` самодостаточен и не включает
+  `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg`; старая ветка `eddy` (SHT36 Max V3,
+  адрес `43`) не тронута. `render_profile.py` и `new_machine.sh` отклоняют
+  `eddy` вместе с `eddy_f` (обе объявляют
+  `[probe_eddy_current fly_eddy_probe]`), требуют `toolhead=sht36-v3`, а при
+  любой eddy-фиче рендер не включает `std.configs/probe.cfg`: Klipper не
+  регистрирует `[probe]` и `[probe_eddy_current]` одновременно.
+  `check_config.py` считает новый модуль fleet alternative и берёт смещения
+  щупа из `[probe_eddy_current ...]`, когда `[probe]` отсутствует. Обновлены
+  `machine.conf.template`, `docs/PROFILES.md` и README (новый раздел
+  «EDDY-F: внешний FLY-EDDY»).
+  **EN:** New `eddy_f` profile option: an external FLY-EDDY probe with the
+  EDDY-F FPC harness in the EDDY connector of the SHT36 V3 / Plus V3 toolboard
+  (hardware I2C `i2c1e`, LDC1612 at address `42`, temperature sensor on
+  `extruder:gpio28`). The `std.configs/sht36-v3.eddy-f.cfg` module is
+  self-contained and does not include `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg`;
+  the old `eddy` branch (SHT36 Max V3, address `43`) is untouched.
+  `render_profile.py` and `new_machine.sh` reject `eddy` together with `eddy_f`
+  (both declare `[probe_eddy_current fly_eddy_probe]`), require
+  `toolhead=sht36-v3`, and with any eddy feature the renderer no longer includes
+  `std.configs/probe.cfg`: Klipper cannot register `[probe]` and
+  `[probe_eddy_current]` at the same time. `check_config.py` treats the new
+  module as a fleet alternative and reads the probe offsets from
+  `[probe_eddy_current ...]` when `[probe]` is absent. Updated
+  `machine.conf.template`, `docs/PROFILES.md` and README (new "EDDY-F: external
+  FLY-EDDY" section).
+
+- **RU:** Гибридный Z на стенде v24-350: `features=...,eddy_f`, `[stepper_z]`
+  в `machine-extras.cfg` паркуется концевиком M3-STOP (`endstop_pin: !SENS_2`,
+  `position_endstop: 0.400` — плейсхолдер до калибровки), а
+  `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` пробируют FLY-EDDY: Klipper
+  выравнивает портал только через объект `probe`. `check_config.py` получил
+  две проверки: `[probe]` вместе с `probe_eddy_current*` — ERROR (Klipper
+  падает на дублирующей регистрации `probe`), и физический `endstop_pin` у
+  `[stepper_z]` без `position_endstop` — ERROR. README и `docs/PROFILES.md`
+  описывают рецепт гибрида и две калибровки.
+  **EN:** Hybrid Z on the v24-350 bench: `features=...,eddy_f`, `[stepper_z]`
+  in `machine-extras.cfg` parks on the M3-STOP switch (`endstop_pin: !SENS_2`,
+  `position_endstop: 0.400` as a placeholder until calibration), while
+  `QUAD_GANTRY_LEVEL` and `BED_MESH_CALIBRATE` probe with FLY-EDDY: Klipper
+  levels the gantry only through the `probe` object. `check_config.py` gained
+  two checks: `[probe]` together with `probe_eddy_current*` is an ERROR
+  (Klipper aborts on the duplicate `probe` registration), and a physical
+  `[stepper_z] endstop_pin` without `position_endstop` is an ERROR. README and
+  `docs/PROFILES.md` document the hybrid recipe and the two calibrations.
+
 ### Changed / Изменено
 
 - **RU:** `xy_driver` разделён на драйвер+мотор; `extruder_motor` заменён на
@@ -64,6 +113,26 @@ Every entry is provided in Russian and English.
   `v24-350` profiles are migrated to schema v2 and re-rendered. The unused
   `mechanics/tmc/xy-tmc2209-17HM19-1684.cfg` is removed: a pair without
   modules in both board families is no longer valid.
+
+### Fixed / Исправлено
+
+- **RU:** `[probe] pin: !SENS_2` был объявлен в файлах всех четырёх плат Manta,
+  а не только в `std.configs/probe.cfg`. Файл платы включается безусловно,
+  поэтому gating eddy-фич (рендер убирал лишь `probe.cfg`) не помогал: Klipper
+  падал с `Registering duplicate object 'probe'`. Пин перенесён в
+  `std.configs/probe.cfg` (алиас `SENS_2` определён в `[board_pins]` каждой
+  платы парка), значения `[probe]` merged-конфига не изменились, а валидатор
+  теперь ловит такую пару секций. `boards/fly-sb2040.cfg` не тронут: у него
+  самостоятельный `[probe]`.
+  **EN:** `[probe] pin: !SENS_2` was declared in the files of all four Manta
+  boards instead of only `std.configs/probe.cfg`. A board file is included
+  unconditionally, so the eddy feature gating (the renderer dropped only
+  `probe.cfg`) did not help: Klipper aborted with
+  `Registering duplicate object 'probe'`. The pin moved into
+  `std.configs/probe.cfg` (`SENS_2` is a `[board_pins]` alias of every board in
+  the fleet), the merged `[probe]` values are unchanged, and the validator now
+  catches that section pair. `boards/fly-sb2040.cfg` is untouched: it has its
+  own self-contained `[probe]`.
 
 ## [1.4.0] - 2026-11-15
 

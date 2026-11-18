@@ -70,8 +70,11 @@ frame_w=@FRAME_W@
 frame_d=@FRAME_D@
 
 # features — дополнительные модули через запятую: fans,display,buttons,belay,
-# btt_sfs,runout,extra_extruder,host,y_frame,eddy.
+# btt_sfs,runout,extra_extruder,host,y_frame,eddy,eddy_f.
 # belay и btt_sfs требуют extra_extruder; fans требует host.
+# eddy (встроенный чип Max V3) и eddy_f (внешний FLY-EDDY с шлейфом EDDY-F)
+# взаимоисключающие; любая из них выключает std.configs/probe.cfg и требует
+# toolhead=sht36-v3.
 features=@FEATURES@
 
 # Измеряемые anchors (только trident): база и нога стола, мм. Раскомментируйте

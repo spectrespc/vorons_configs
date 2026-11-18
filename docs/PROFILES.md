@@ -27,8 +27,9 @@ printers/<id>/
 3. **модуль X/Y** `mechanics/tmc/<семейство>/xy-<xy_driver>-<xy_motor>.cfg`;
 4. **модуль Z** `mechanics/tmc/<z_count>z-<z_driver>-<z_motor>.cfg`;
 5. шаг моторов X/Y и геометрия `geometry/<model>-<size>.cfg`;
-6. подсистемы (fans/display/buttons), probe, стол, экструдер;
-7. фичи (belay, btt_sfs, runout, extra_extruder, host, y_frame, eddy);
+6. подсистемы (fans/display/buttons), `probe.cfg` (кроме eddy-фич), стол,
+   экструдер;
+7. фичи (belay, btt_sfs, runout, extra_extruder, host, y_frame, eddy, eddy_f);
 8. `std.macros`, `anchors.cfg`, `machine-extras.cfg`, для v24 — `homing.cfg`.
 
 Модули `mechanics/trident.cfg` и `mechanics/v24.cfg` больше не включают TMC
@@ -62,7 +63,7 @@ Z-модули: пара Z задаётся только ключами проф
 | `vm_ze` | `24` | всегда 24 В: Z и оба экструдера |
 | `frame_w`, `frame_d` | мм | необязательные; положительные; `check_config.py` сверяет с размахом `z_positions` |
 | `z_base_measured`, `z_leg_measured` | мм | необязательные (trident); сверяются с `z_positions` из `anchors.cfg` |
-| `features` | `fans,display,buttons,belay,btt_sfs,runout,extra_extruder,host,y_frame,eddy` | необязательный; `belay`/`btt_sfs` требуют `extra_extruder`, `fans` требует `host` |
+| `features` | `fans,display,buttons,belay,btt_sfs,runout,extra_extruder,host,y_frame,eddy,eddy_f` | необязательный; `belay`/`btt_sfs` требуют `extra_extruder`, `fans` требует `host`; `eddy` и `eddy_f` взаимоисключающие, требуют `toolhead=sht36-v3` и убирают `probe.cfg` |
 
 ### Правила согласованности
 
@@ -88,6 +89,30 @@ Z-модули: пара Z задаётся только ключами проф
   (`sht36-v3` — TMC2209); `e_motor` задаёт только мотор. Так профиль не может
   разъехаться с железом toolhead. Драйвер виден в resolved-карте заголовка
   `profile.cfg`.
+- **eddy-щупы взаимоисключающие.** `eddy` (встроенный LDC1612 SHT36 Max V3,
+  адрес `43`) и `eddy_f` (внешний FLY-EDDY с шлейфом EDDY-F, адрес `42`) обе
+  объявляют `[probe_eddy_current fly_eddy_probe]`, поэтому включить можно
+  только одну. Любая из них требует `toolhead=sht36-v3` (пины на MCU
+  `extruder`) и выключает `std.configs/probe.cfg` — иначе Klipper падает на
+  дублирующей регистрации `[probe]`/`[probe_eddy_current]`. Z-хоуминг остаётся
+  на `probe:z_virtual_endstop` из механики.
+- **Гибрид: Z по концевику, QGL/bed_mesh по eddy.** `QUAD_GANTRY_LEVEL`
+  в Klipper работает только через объект `probe`, поэтому выровнять портал
+  концевиком нельзя. Если у машины с `eddy`/`eddy_f` Z паркуется аппаратным
+  концевиком, профиль задаёт его в `machine-extras.cfg` (managed-слой,
+  `[stepper_z]` там уже переопределён):
+
+  ```ini
+  [stepper_z]
+  endstop_pin: !SENS_2
+  position_endstop: 0.400 # калибруется Z_ENDSTOP_CALIBRATE
+  ```
+
+  `position_endstop` обязателен: Klipper принимает его отсутствие только при
+  `probe:z_virtual_endstop`. При этом eddy-фича остаётся включённой: `G28 Z`
+  идёт по концевику, `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` — по щупу.
+  `check_config.py` требует `position_endstop` для любого не-`probe:`
+  `endstop_pin` и запрещает `[probe]` вместе с `[probe_eddy_current]`.
 - **`extruder_motor` и составной `xy_driver` — устаревшие.** Схема v1 писала
   `xy_driver=tmc5160-17HM19-1684` и `extruder_motor=...`. Теперь это ошибки с
   явной подсказкой: разбейте на `xy_driver` + `xy_motor` и переименуйте

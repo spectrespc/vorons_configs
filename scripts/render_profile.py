@@ -13,6 +13,9 @@ deterministic profile.cfg with a fixed include order:
     std.macros -> anchors.cfg -> machine-extras.cfg -> probe temperature guard
     (v24)
 
+std.configs/probe.cfg is emitted only when no eddy feature is enabled: an eddy
+probe registers as "probe" itself and both sections abort Klipper.
+
 The generated manifest is committed into the profile and re-rendered by
 deploy_configs.sh, which aborts when the committed copy is stale.
 
@@ -157,6 +160,7 @@ FEATURES = {
     "host": ["std.configs/host.cfg"],
     "y_frame": ["std.configs/sensors/y-frame/{board}.cfg"],
     "eddy": ["std.configs/sht36-v3.eddy.cfg"],
+    "eddy_f": ["std.configs/sht36-v3.eddy-f.cfg"],
 }
 
 # A feature whose config references an MCU must never be enabled without the
@@ -166,6 +170,17 @@ FEATURE_DEPENDENCIES = {
     "btt_sfs": ("extra_extruder", "its sensors are wired to the extra extruder MCU"),
     "fans": ("host", "fans/host_fan.cfg needs the host MCU ([mcu host])"),
 }
+
+# Feature pairs that declare the same Klipper section.  Klipper merges same-named
+# sections with last-wins semantics, so enabling both would silently pick one.
+FEATURE_CONFLICTS = {
+    "eddy": ("eddy_f", "both declare [probe_eddy_current fly_eddy_probe]"),
+}
+
+# Eddy probes are wired to the toolhead board and address its MCU ("extruder"),
+# so they need the board module that declares that MCU.
+EDDY_FEATURES = ("eddy", "eddy_f")
+EDDY_TOOLHEAD = "sht36-v3"
 
 KNOWN_KEYS = {
     "size",
@@ -361,6 +376,35 @@ def check_model_profile(
             "or the key, see docs/PROFILES.md)"
             % (leveling, model, expected_leveling)
         )
+
+
+def check_feature_rules(features: list[str], toolhead: str | None) -> None:
+    """Reject mutually exclusive features and eddy probes without a toolhead.
+
+    >>> check_feature_rules(["fans", "eddy_f"], "sht36-v3")
+    >>> try:
+    ...     check_feature_rules(["eddy_f", "eddy"], "sht36-v3")
+    ... except ProfileError as exc:
+    ...     print(str(exc).split(":")[0])
+    features 'eddy' and 'eddy_f' are mutually exclusive
+    >>> try:
+    ...     check_feature_rules(["eddy_f"], None)
+    ... except ProfileError as exc:
+    ...     print(str(exc).split(":")[0])
+    feature 'eddy_f' requires toolhead=sht36-v3
+    """
+    for name, (other, reason) in FEATURE_CONFLICTS.items():
+        if name in features and other in features:
+            raise ProfileError(
+                "features %r and %r are mutually exclusive: %s (Klipper merges "
+                "the sections, last value wins)" % (name, other, reason)
+            )
+    for name in EDDY_FEATURES:
+        if name in features and toolhead != EDDY_TOOLHEAD:
+            raise ProfileError(
+                "feature %r requires toolhead=%s: its pins live on the toolhead "
+                "MCU 'extruder'" % (name, EDDY_TOOLHEAD)
+            )
 
 
 def _find_module(rel_dir: str, stem: str) -> str | None:
@@ -703,6 +747,7 @@ def validate(values: dict[str, str], strict: bool = True) -> dict[str, object]:
             raise ProfileError(
                 "feature %r requires %r: %s" % (name, required, reason)
             )
+    check_feature_rules(features, toolhead)
 
     numeric: dict[str, float] = {}
     for key in ("frame_w", "frame_d", "z_base_measured", "z_leg_measured"):
@@ -803,7 +848,11 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
             includes.append("std.configs/display/mini12864-swspi.cfg")
     if "buttons" in features:
         includes.extend(path.format(board=family) for path in FEATURES["buttons"])
-    includes.append("std.configs/probe.cfg")
+    if not any(name in features for name in EDDY_FEATURES):
+        # Registered together, [probe] and [probe_eddy_current] abort Klipper
+        # with "Registering duplicate object 'probe'"; an eddy module registers
+        # as "probe" itself, so the physical probe section must be left out.
+        includes.append("std.configs/probe.cfg")
     includes.append("std.configs/bed/%s.cfg" % family)
     if checked["head"]:
         includes.append("std.configs/extruder/heads/%s.cfg" % checked["head"])
@@ -812,7 +861,7 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
     for name in ("belay", "btt_sfs", "runout", "extra_extruder", "host"):
         if name in features:
             includes.extend(path.format(board=family) for path in FEATURES[name])
-    for name in ("y_frame", "eddy"):
+    for name in ("y_frame", "eddy", "eddy_f"):
         if name in features:
             includes.extend(path.format(board=family) for path in FEATURES[name])
 

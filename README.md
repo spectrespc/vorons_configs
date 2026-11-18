@@ -30,7 +30,7 @@
 | `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
 | `vm_xy` | `48` (по умолчанию), `55` | питание драйверов X/Y; 55 В допустимы только на `manta-m8p` (V2.0, HV-вход 24–60 В) |
 | `vm_ze` | `24` | питание Z и обоих экструдеров; другие значения отклоняются |
-| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | подключаемые подсистемы |
+| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy`, `eddy_f` | подключаемые подсистемы |
 | `frame_w`, `frame_d` | мм | внешняя рама, для проверки якорей |
 | `z_base_measured`, `z_leg_measured` | мм | измеренные стороны треугольника стола (trident) |
 
@@ -196,8 +196,84 @@ USB-CAN-мост на `PD12`/`PD13`). Стол на v1.x, как и на V2.0, �
   `new_machine.sh`, рендер и деплой не выполняются.
 - `fans` требует `host`: `fans/host_fan.cfg` использует пин `host:gpio19`, а
   `[mcu host]` объявляется только файлом фичи `host`.
+- `eddy` и `eddy_f` — вихретоковые щупы. Они взаимоисключающие, требуют
+  `toolhead=sht36-v3` и убирают `std.configs/probe.cfg` (см. раздел
+  «EDDY-F: внешний FLY-EDDY»).
 - `local/uuids.cfg`, созданный мастером, содержит `[mcu]` и `[mcu extruder]`
   всегда, а `[mcu ext-extruder]` — только при `extra_extruder`.
+
+### EDDY-F: внешний FLY-EDDY
+
+Опция `eddy_f` подключает внешний вихретоковый щуп FLY-EDDY со шлейфом
+**EDDY-F (FPC)** в разъём EDDY платы SHT36 V3 / Plus V3. Модуль —
+`std.configs/sht36-v3.eddy-f.cfg`: аппаратный I2C `i2c1e`, LDC1612 по адресу
+`42`, датчик температуры на `extruder:gpio28` (`Generic 3950`). Встроенный чип
+SHT36 **Max** V3 живёт по адресу `43` — это отдельная фича `eddy`.
+
+Включение — в `printers/<id>/machine.conf`:
+
+```ini
+toolhead=sht36-v3
+features=...,eddy_f
+```
+
+- `eddy` и `eddy_f` взаимоисключающие: обе объявляют
+  `[probe_eddy_current fly_eddy_probe]`, поэтому рендер и `new_machine.sh`
+  отклоняют такую пару.
+- Любая eddy-фича требует `toolhead=sht36-v3`: пины живут на MCU `extruder`.
+- При `eddy_f` (как и при `eddy`) рендерер **не включает**
+  `std.configs/probe.cfg`: Klipper не даёт одновременно зарегистрировать
+  `[probe]` и `[probe_eddy_current]`. Z-хоуминг продолжает работать через
+  `probe:z_virtual_endstop` из механики, `[safe_z_home]` не меняется.
+- `x_offset`/`y_offset` в модуле — плейсхолдеры `0`: их измеряют по факту
+  крепления катушки (в примере Mellow — `21.42`). `z_offset` перезаписывает
+  `SAVE_CONFIG` после калибровки. Катушку ставят в 2–3 мм над соплом, а
+  `descend_z: 2.5` — номинальный зазор сопло–стол, на котором останавливается
+  пробирование.
+- Нужен свежий Klipper с `probe_eddy_current` (`descend_z`, `rapid_scan`).
+  Калибровка обязательна до первой печати: `LDC_CALIBRATE_DRIVE_CURRENT` и
+  `PROBE_EDDY_CURRENT_CALIBRATE`; макросы
+  `_LDC_CALIBRATE_DRIVE_CURRENT`/`PROBE_EDDY_CURRENT_CALIBRATE_AUTO` из
+  документации Mellow оператор добавляет временно.
+- Шлейф FPC подключать только при снятом питании платы.
+
+#### Гибрид: концевик для Z, eddy для QGL/bed_mesh
+
+`QUAD_GANTRY_LEVEL` в Klipper работает только через объект `probe`
+(`quad_gantry_level.py` делает `lookup_object('probe')`), поэтому выровнять
+портал по аппаратному концевику нельзя. Гибрид разделяет роли: `G28 Z`
+паркуется по концевику M3-STOP (`SENS_2`), а `QUAD_GANTRY_LEVEL` и
+`BED_MESH_CALIBRATE` пробируют eddy-щупом.
+
+Рецепт — в `machine-extras.cfg` профиля (`[stepper_z]` там уже переопределён
+пинами Z-моторов, так что это разрешённый managed-слой):
+
+```ini
+[stepper_z]
+endstop_pin: !SENS_2
+position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
+```
+
+`position_endstop` обязателен: Klipper принимает его отсутствие только при
+`probe:z_virtual_endstop`, иначе отказывается грузить секцию. `descend_z: 2.5`
+в eddy-модуле остаётся страховкой пробирования (номинальный зазор
+сопло–стол, на котором попытка останавливается).
+
+Калибровок две, и обе заканчиваются `SAVE_CONFIG` — значения живут только в
+autosave на стенде (`printer.cfg`), в git не попадают:
+
+1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — `z_offset` eddy;
+2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика.
+
+Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
+должна дать ≈ 0 (± 0.02 мм); расхождение означает, что одна из калибровок
+неверна.
+
+В коммитнутом профиле `v24-350` гибрид уже включён (`features=...,eddy_f`,
+override — в его `machine-extras.cfg`); до калибровки на стенде
+`position_endstop: 0.400` и `z_offset` — плейсхолдеры. Требования те же, что у
+обычного `eddy_f`: свежий Klipper с `descend_z` и шлейф EDDY-F, подключаемый
+только при снятом питании платы.
 
 ### Проверки валидатора
 
@@ -207,6 +283,12 @@ USB-CAN-мост на `PD12`/`PD13`). Стол на v1.x, как и на V2.0, �
 - **ERROR** — pin-префикс `NAME:` (`^NAME:PIN`, `NAME:PIN`), `mcu:` у
   `[board_pins]` или `sensor_mcu:` у `[temperature_sensor]` ссылается на MCU,
   для которого нет `[mcu NAME]` (виртуальные `*_virtual_endstop` исключены).
+- **ERROR** — `[probe]` вместе с секцией `probe_eddy_current*`: Klipper
+  регистрирует оба объекта как `probe` и падает на
+  `Registering duplicate object 'probe'`. Ошибка ловится и при возврате
+  `[probe]` в файл платы: парсер такие дубликаты молча сливает.
+- **ERROR** — у `[stepper_z]` задан физический `endstop_pin` (не `probe:…`),
+  а `position_endstop` нет: Klipper требует его для аппаратного Z-концевика.
 - **WARNING** — `[mcu NAME]` объявлен, но на него нет ни одной ссылки: признак
   осиротевшей секции от платы, которой на машине нет. Неявный `mcu` и `host`
   предупреждение не вызывают.
@@ -698,16 +780,26 @@ Klipper, прошивает платы, запускает Klipper и запис
   voron-t и на стенде требует перекалибровки до первой печати.
   Вход probe у всей семьи M8P перенесён на `SENS_2` (M3-STOP, разъём с
   маркировкой «Z stop»): `PF2` у V2.0, `PF5` у V1.x; референсные M4-STOP/PF1
-  (V2.0) и PC0 (V1.x) свободны. На стенде зонд должен быть переставлен на
+  (V2.0) и PC0 (V1.x) свободны. Сам `pin: !SENS_2` теперь объявлен в
+  `std.configs/probe.cfg`, а не в файлах плат: файл платы включается всегда, и
+  оставленный там `[probe]` регистрировал второй probe-объект в любом
+  eddy-профиле. На стенде зонд должен быть переставлен на
   M3-STOP — если проводка осталась в M4-STOP, `QUERY_PROBE` не увидит
   срабатывание, а `G28 Z` уедет в стол.
+- Гибрид на v24-350 (парковка Z по концевику, QGL и `bed_mesh` по eddy)
+  включён в коммитнутом профиле, но на стенде ещё не проверен: нужны Klipper с
+  `descend_z` и подключённый FLY-EDDY. `check_config.py` ловит обе типовые
+  ошибки такой сборки — `[probe]` вместе с `[probe_eddy_current]` и физический
+  `endstop_pin` у `[stepper_z]` без `position_endstop`.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
 - Маржа `bed_mesh` для размеров кроме 150 — каталожное значение `0.3·S` до
   замеров на конкретных машинах.
-- Ветка Eddy (`std.configs/sht36-v3.eddy.cfg`) выключена; макросы
-  `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` ещё не перенесены с машины-донора.
+- Ветка `eddy` (`std.configs/sht36-v3.eddy.cfg`, встроенный чип SHT36 Max V3)
+  по-прежнему выключена: макросы `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` не
+  перенесены с машины-донора. Новая опция `eddy_f` самодостаточна и этих
+  макросов не требует.
 - Прошивка проверена офлайн (`--dry-run` и реальные сборки): CAN/serial/DFU
   требуют `~/katapult` и `python3-serial` и запускаются вручную из консоли.
 
@@ -742,7 +834,7 @@ guide live in [`docs/PROFILES.md`](docs/PROFILES.md) (Russian).
 | `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
 | `vm_xy` | `48` (default), `55` | X/Y driver rail; 55 V is legal only on `manta-m8p` (V2.0, HV input 24-60 V) |
 | `vm_ze` | `24` | Z and both extruders; any other value is rejected |
-| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy` | optional subsystems |
+| `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy`, `eddy_f` | optional subsystems |
 | `frame_w`, `frame_d` | mm | outer frame, used for anchor sanity checks |
 | `z_base_measured`, `z_leg_measured` | mm | measured bed triangle sides (trident) |
 
@@ -908,8 +1000,85 @@ for the listed features. Fleet machines come with the SHT42 board
   `new_machine.sh`; rendering and deploy stop.
 - `fans` requires `host`: `fans/host_fan.cfg` drives `host:gpio19`, and
   `[mcu host]` is only declared by the `host` feature file.
+- `eddy` and `eddy_f` are eddy-current probes. They are mutually exclusive,
+  require `toolhead=sht36-v3` and drop `std.configs/probe.cfg` (see
+  "EDDY-F: external FLY-EDDY").
 - The `local/uuids.cfg` created by the wizard always contains `[mcu]` and
   `[mcu extruder]`, and `[mcu ext-extruder]` only with `extra_extruder`.
+
+### EDDY-F: external FLY-EDDY
+
+The `eddy_f` option wires an external FLY-EDDY probe with the **EDDY-F (FPC)**
+harness into the EDDY connector of the SHT36 V3 / Plus V3 toolboard. The module
+is `std.configs/sht36-v3.eddy-f.cfg`: hardware I2C on `i2c1e`, LDC1612 at
+address `42`, the temperature sensor on `extruder:gpio28` (`Generic 3950`). The
+built-in SHT36 **Max** V3 chip lives at `43` and is the separate `eddy` feature.
+
+Enable it in `printers/<id>/machine.conf`:
+
+```ini
+toolhead=sht36-v3
+features=...,eddy_f
+```
+
+- `eddy` and `eddy_f` are mutually exclusive: both declare
+  `[probe_eddy_current fly_eddy_probe]`, so the renderer and `new_machine.sh`
+  reject that pair.
+- Any eddy feature requires `toolhead=sht36-v3`: its pins live on the
+  `extruder` MCU.
+- With `eddy_f` (and with `eddy`) the renderer **does not include**
+  `std.configs/probe.cfg`: Klipper cannot register `[probe]` and
+  `[probe_eddy_current]` at the same time. Z homing keeps working through the
+  mechanics `probe:z_virtual_endstop`, and `[safe_z_home]` is unchanged.
+- `x_offset`/`y_offset` in the module are `0` placeholders: measure them at the
+  actual coil mount (the Mellow example shows `21.42`). `z_offset` is
+  overwritten by `SAVE_CONFIG` after calibration. Mount the coil 2-3 mm above
+  the nozzle; `descend_z: 2.5` is the nominal nozzle-to-bed gap at which a
+  probing attempt stops.
+- A current Klipper with `probe_eddy_current` (`descend_z`, `rapid_scan`) is
+  required. Calibration is mandatory before the first print:
+  `LDC_CALIBRATE_DRIVE_CURRENT` and `PROBE_EDDY_CURRENT_CALIBRATE`; the
+  `_LDC_CALIBRATE_DRIVE_CURRENT`/`PROBE_EDDY_CURRENT_CALIBRATE_AUTO` macros from
+  the Mellow documentation are added temporarily by the operator.
+- Connect the FPC harness only with the board powered off.
+
+#### Hybrid: switch for Z, eddy for QGL/bed_mesh
+
+In Klipper `QUAD_GANTRY_LEVEL` works only through the `probe` object
+(`quad_gantry_level.py` calls `lookup_object('probe')`), so the gantry cannot be
+levelled with a hardware switch. The hybrid splits the roles: `G28 Z` parks on
+the M3-STOP switch (`SENS_2`), while `QUAD_GANTRY_LEVEL` and
+`BED_MESH_CALIBRATE` probe with the eddy sensor.
+
+The recipe goes into the profile's `machine-extras.cfg` (`[stepper_z]` already
+reopens there for the Z motor pins, so this is an accepted managed layer):
+
+```ini
+[stepper_z]
+endstop_pin: !SENS_2
+position_endstop: 0.400 # placeholder until Z_ENDSTOP_CALIBRATE
+```
+
+`position_endstop` is mandatory: Klipper accepts its absence only with
+`probe:z_virtual_endstop` and otherwise refuses to load the section.
+`descend_z: 2.5` in the eddy module stays the safety stop of probing (the
+nominal nozzle-to-bed gap at which an attempt ends).
+
+There are two calibrations and both end with `SAVE_CONFIG`; the values live
+only in the bench autosave (`printer.cfg`) and are never committed:
+
+1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the eddy `z_offset`;
+2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`.
+
+Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
+at the bed centre must read about 0 (+/- 0.02 mm); a difference means one of
+the calibrations is wrong.
+
+The committed `v24-350` profile already enables the hybrid
+(`features=...,eddy_f`, the override lives in its `machine-extras.cfg`); until
+it is calibrated on the bench `position_endstop: 0.400` and `z_offset` are
+placeholders. The requirements match plain `eddy_f`: a current Klipper with
+`descend_z`, and the EDDY-F harness connected only with the board powered off.
 
 ### Validator checks
 
@@ -919,6 +1088,12 @@ references against the original option text:
 - **ERROR** — a pin prefix `NAME:` (`^NAME:PIN`, `NAME:PIN`), `mcu:` in
   `[board_pins]` or `sensor_mcu:` in `[temperature_sensor]` that names an MCU
   without a `[mcu NAME]` section (virtual `*_virtual_endstop` pins are ignored).
+- **ERROR** — `[probe]` next to a `probe_eddy_current*` section: Klipper
+  registers both objects as `probe` and aborts with
+  `Registering duplicate object 'probe'`. The check also catches a `[probe]`
+  returning to a board file, which the config parser merges silently.
+- **ERROR** — `[stepper_z]` has a physical `endstop_pin` (not `probe:...`) but
+  no `position_endstop`: Klipper requires it for a hardware Z endstop.
 - **WARNING** — `[mcu NAME]` is declared but nothing references it, which
   signals an orphaned section from a board the machine does not have. The
   implicit `mcu` and `host` never produce this warning.
@@ -1409,16 +1584,26 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   comes from voron-t and needs recalibration on the bench before the first
   print. The probe input of the whole M8P family moved to `SENS_2` (M3-STOP,
   the connector labelled "Z stop"): `PF2` on V2.0, `PF5` on V1.x; the reference
-  M4-STOP/PF1 (V2.0) and PC0 (V1.x) inputs stay free. On the bench the probe
-  must be rewired to M3-STOP — if it is still in M4-STOP, `QUERY_PROBE` will
-  not see a trigger and `G28 Z` will drive into the bed.
+  M4-STOP/PF1 (V2.0) and PC0 (V1.x) inputs stay free. The `pin: !SENS_2` line
+  itself now lives in `std.configs/probe.cfg` instead of the board files: a
+  board file is always included, so a `[probe]` left there registered a second
+  probe object in every eddy profile. On the bench the probe must be rewired to
+  M3-STOP — if it is still in M4-STOP, `QUERY_PROBE` will not see a trigger and
+  `G28 Z` will drive into the bed.
+- The v24-350 hybrid (park Z on the switch, QGL and `bed_mesh` on the eddy) is
+  enabled in the committed profile but not yet tested on the bench: it needs a
+  Klipper with `descend_z` and a connected FLY-EDDY. `check_config.py` now
+  catches the two typical mistakes of such a build: `[probe]` together with
+  `[probe_eddy_current]`, and a physical `[stepper_z] endstop_pin` without
+  `position_endstop`.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
 - `bed_mesh` margin for sizes other than 150 is the catalog value `0.3·S` until each
   machine is measured.
-- The Eddy branch (`std.configs/sht36-v3.eddy.cfg`) is disabled; the
-  `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` files have not been copied from the donor
-  machine yet.
+- The `eddy` branch (`std.configs/sht36-v3.eddy.cfg`, the built-in SHT36 Max V3
+  chip) is still disabled: the `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` files
+  have not been copied from the donor machine yet. The new `eddy_f` option is
+  self-contained and does not need those macros.
 - Flashing is validated offline (`--dry-run` plus real builds): CAN/serial/DFU
   need `~/katapult` and `python3-serial` and are run manually from a console.

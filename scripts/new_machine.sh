@@ -61,9 +61,11 @@ Optional:
       --vm-xy N       X/Y driver rail: 48 (default) or 55.  55 V is only
                       accepted on manta-m8p (V2.0 HV input); Z/E stay on 24 V.
       --features LIST comma separated: fans,display,buttons,belay,
-                      btt_sfs,runout,extra_extruder,host,y_frame,eddy
+                      btt_sfs,runout,extra_extruder,host,y_frame,eddy,eddy_f
                       (belay and btt_sfs require extra_extruder: their
-                      sensors are wired to the SHT42 board). When omitted on
+                      sensors are wired to the SHT42 board). eddy and eddy_f
+                      are mutually exclusive; either one drops probe.cfg and
+                      requires toolhead=sht36-v3. When omitted on
                       an interactive terminal the wizard asks for the list.
       --frame-w MM    frame width (default: size + 160)
       --frame-d MM    frame depth (default: size + 160)
@@ -173,8 +175,9 @@ fi
 if (( ! FEATURES_SET )) && [[ -t 0 ]]; then
   cat >&2 <<'EOF'
 Features (comma separated, empty for none):
-  fans,display,buttons,runout,host,y_frame,eddy
+  fans,display,buttons,runout,host,y_frame,eddy,eddy_f
   extra_extruder (SHT42) is required by belay and btt_sfs
+  eddy and eddy_f are mutually exclusive (both own fly_eddy_probe)
 EOF
   read -r -p "features: " FEATURES
 fi
@@ -189,6 +192,11 @@ for feature in belay btt_sfs; do
     exit 2
   fi
 done
+if has_feature eddy && has_feature eddy_f; then
+  echo "ERROR: features 'eddy' and 'eddy_f' are mutually exclusive: both declare" >&2
+  echo "[probe_eddy_current fly_eddy_probe]. Keep exactly one of them." >&2
+  exit 2
+fi
 
 PROFILE_DIR="$SRC/printers/$ID"
 if [[ -e "$PROFILE_DIR" ]] && (( ! FORCE )); then

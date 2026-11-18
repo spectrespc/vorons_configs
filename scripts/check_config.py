@@ -21,7 +21,9 @@ Usage:
 Exit status: 1 if at least one error was found, otherwise 0.
 
 Diagnostics:
-  ERROR    missing/recursive include, parse error
+  ERROR    missing/recursive include, parse error, two probe objects
+           ([probe] + [probe_eddy_current ...]), physical [stepper_z]
+           endstop without position_endstop
   WARNING  duplicate section name, repeated option (last-wins)
   NOTICE   module .cfg under std.configs/ or std.macros/ that is not
            included by any profile and is not a known fleet alternative
@@ -47,7 +49,12 @@ ALT_MODULES = {
     "std.configs/display/mini12864-swspi.cfg",
     "std.configs/extruder/heads/BMG.8T.cfg",
     "std.configs/extruder/tc/104-gt2.cfg",
+    # The physical probe module is the alternative of the eddy modules: the
+    # renderer includes exactly one of them, so an eddy-only tree legitimately
+    # leaves probe.cfg out.
+    "std.configs/probe.cfg",
     "std.configs/sht36-v3.eddy.cfg",
+    "std.configs/sht36-v3.eddy-f.cfg",
     "std.macros/homing.cfg",
     "std.macros/actions_filament.cfg",
     "std.macros/filament_load_unload.cfg",
@@ -369,6 +376,34 @@ class Checker:
                     "fleet alternative" % rel
                 )
 
+    # -- object registration -------------------------------------------
+    def check_probe_objects(self) -> None:
+        """Reject a config that registers two probe objects.
+
+        Klipper's ``probe`` module claims the object name "probe", and a
+        ``[probe_eddy_current NAME]`` section registers itself under the same
+        name.  The second registration aborts startup with "Registering
+        duplicate object 'probe'".  The section scan below is needed because
+        the config parser merges same-named sections silently and board
+        catalog files are a merge layer, so no other diagnostic covers the
+        combination [probe] + [probe_eddy_current ...].
+        """
+        if not self.fileconfig.has_section("probe"):
+            return
+        eddy = [
+            name
+            for name in self.fileconfig.sections()
+            if name.split(None, 1)[0].lower() == "probe_eddy_current"
+        ]
+        if not eddy:
+            return
+        self.error(
+            "probe: [probe]%s and [%s]%s both register the Klipper object "
+            "'probe'; Klipper aborts with \"Registering duplicate object "
+            "'probe'\". Keep the physical [probe] or the eddy module, not both"
+            % (self._location("probe"), eddy[0], self._location(eddy[0]))
+        )
+
     # -- geometry invariants ------------------------------------------
     def _opt(self, section: str, option: str) -> str | None:
         if not self.fileconfig.has_section(section):
@@ -497,8 +532,27 @@ class Checker:
             if high <= low:
                 self.error("geometry: %s position_max must be above position_min" % axis)
                 continue
-        off_x = self._float("probe", "x_offset", 0.0) or 0.0
-        off_y = self._float("probe", "y_offset", 0.0) or 0.0
+        off_x = self._float("probe", "x_offset", None)
+        off_y = self._float("probe", "y_offset", None)
+        if off_x is None or off_y is None:
+            # An eddy probe registers as "probe" but has no [probe] section:
+            # the offsets live in [probe_eddy_current NAME] (Klipper merges
+            # them into the probe it exposes).
+            eddy_section = next(
+                (
+                    name
+                    for name in cfg.sections()
+                    if name.split(None, 1)[0].lower() == "probe_eddy_current"
+                ),
+                None,
+            )
+            if eddy_section is not None:
+                if off_x is None:
+                    off_x = self._float(eddy_section, "x_offset", 0.0)
+                if off_y is None:
+                    off_y = self._float(eddy_section, "y_offset", 0.0)
+        off_x = off_x or 0.0
+        off_y = off_y or 0.0
 
         def check_xy(x: float, y: float, label: str, apply_offset: bool) -> None:
             tool_x = x - off_x if apply_offset else x
@@ -637,6 +691,31 @@ class Checker:
                         "geometry: %s has no '# замер YYYY-MM-DD' measurement date"
                         % anchors
                     )
+
+    # -- Z endstop -----------------------------------------------------
+    def check_z_endstop(self) -> None:
+        """Require position_endstop when [stepper_z] homes on a physical pin.
+
+        Klipper accepts a missing position_endstop only when Z homes through
+        the probe ("probe:z_virtual_endstop"). A machine that parks Z on a
+        hardware switch - the hybrid eddy setup, or an eddy machine whose
+        toolhead has its own endstop - must therefore carry the calibrated
+        value in [stepper_z]; without it Klipper refuses to load the section.
+        """
+        raw = self._opt("stepper_z", "endstop_pin")
+        if raw is None:
+            return
+        endstop = raw.strip()
+        if not endstop or endstop.lstrip("!^~").startswith("probe:"):
+            return
+        if self._opt("stepper_z", "position_endstop") is not None:
+            return
+        self.error(
+            "stepper_z: endstop_pin %r is a physical endstop but "
+            "position_endstop is not set; Klipper needs it (run "
+            "Z_ENDSTOP_CALIBRATE, or home Z through the probe with "
+            "probe:z_virtual_endstop)" % endstop
+        )
 
     # -- MCU references ------------------------------------------------
     def _location(self, section: str, option: str | None = None) -> str:
@@ -857,7 +936,9 @@ def run_checks(
     for filename, include_dirs, local_dir, machine_conf in roots:
         checker = Checker()
         checker.parse_file(filename, include_dirs, local_dir)
+        checker.check_probe_objects()
         checker.check_geometry(machine_conf)
+        checker.check_z_endstop()
         checker.check_machine_voltage(machine_conf)
         checker.check_mcu_references()
         checker.emit(stream=sys.stdout)
