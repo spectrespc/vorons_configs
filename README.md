@@ -313,6 +313,13 @@ position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
 Z=0 по бумаге, после чего расхождение `PROBE` с нулём убирают
 `Z_OFFSET_APPLY_PROBE`.
 
+Для `scan`/`rapid_scan` высоту сканирования передают параметром команды
+`HORIZONTAL_MOVE_Z=<descend_z>` (2.5): таблица `calibrate` покрывает только
+свой диапазон, а штатные 5 мм у `bed_mesh` и 10 мм у QGL выходят за него —
+`probe_eddy_current sensor not in valid range`. Понижать `horizontal_move_z`
+в секциях до 2.5 нельзя: в режиме `automatic` (descend) пробирование
+начинается с этой высоты и сразу упрётся в `descend_z`.
+
 Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
 должна дать ≈ 0 (± 0.02 мм); расхождение означает, что одна из калибровок
 неверна.
@@ -1215,6 +1222,13 @@ frequency span and ~1 um of noise (v24-350 bench, 2026-11-18). So either mount
 the coil at the recommended 2-3 mm above the nozzle, or calibrate from a raised
 position and set the zero separately: `Z_ENDSTOP_CALIBRATE` defines Z=0 on
 paper, then the `PROBE` difference is removed with `Z_OFFSET_APPLY_PROBE`.
+
+For `scan`/`rapid_scan` pass the scan height as a command parameter,
+`HORIZONTAL_MOVE_Z=<descend_z>` (2.5): the `calibrate` table covers only its
+own range, and the default 5 mm of `bed_mesh` and 10 mm of QGL fall outside it -
+`probe_eddy_current sensor not in valid range`. Do not lower `horizontal_move_z`
+in the sections to 2.5: in `automatic` (descend) mode probing starts at that
+height and would hit `descend_z` immediately.
 
 Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
 at the bed centre must read about 0 (+/- 0.02 mm); a difference means one of
