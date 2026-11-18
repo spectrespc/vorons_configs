@@ -792,9 +792,13 @@ Klipper, прошивает платы, запускает Klipper и запис
   M3-STOP — если проводка осталась в M4-STOP, `QUERY_PROBE` не увидит
   срабатывание, а `G28 Z` уедет в стол.
 - Гибрид на v24-350 (парковка Z по концевику, QGL и `bed_mesh` по eddy)
-  включён в коммитнутом профиле, но на стенде ещё не проверен: нужны Klipper с
-  `descend_z` и подключённый FLY-EDDY. `check_config.py` ловит обе типовые
-  ошибки такой сборки — `[probe]` вместе с `[probe_eddy_current]` и физический
+  включён в коммитнутом профиле и загружается на стенде (2026-11-18: `probe` —
+  это `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` видит `stepper_z`,
+  в логе нет `Registering duplicate object` и `Timer too close`), но
+  калибровки и прогоны QGL/mesh ещё не выполнены: до
+  `PROBE_EDDY_CURRENT_CALIBRATE` щуп не откалиброван, а `position_endstop`
+  остаётся плейсхолдером. `check_config.py` ловит обе типовые ошибки такой
+  сборки — `[probe]` вместе с `[probe_eddy_current]` и физический
   `endstop_pin` у `[stepper_z]` без `position_endstop`.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
@@ -1601,9 +1605,13 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   M3-STOP — if it is still in M4-STOP, `QUERY_PROBE` will not see a trigger and
   `G28 Z` will drive into the bed.
 - The v24-350 hybrid (park Z on the switch, QGL and `bed_mesh` on the eddy) is
-  enabled in the committed profile but not yet tested on the bench: it needs a
-  Klipper with `descend_z` and a connected FLY-EDDY. `check_config.py` now
-  catches the two typical mistakes of such a build: `[probe]` together with
+  enabled in the committed profile and loads on the bench (2026-11-18: `probe`
+  is `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` reports `stepper_z`,
+  and the log has no `Registering duplicate object` or `Timer too close`), but
+  the calibrations and the QGL/mesh runs are still pending: before
+  `PROBE_EDDY_CURRENT_CALIBRATE` the sensor is uncalibrated and
+  `position_endstop` is a placeholder. `check_config.py` now catches the two
+  typical mistakes of such a build: `[probe]` together with
   `[probe_eddy_current]`, and a physical `[stepper_z] endstop_pin` without
   `position_endstop`.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
