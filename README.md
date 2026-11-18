@@ -223,13 +223,17 @@ features=...,eddy_f
 - Любая eddy-фича требует `toolhead=sht36-v3`: пины живут на MCU `extruder`.
 - При `eddy_f` (как и при `eddy`) рендерер **не включает**
   `std.configs/probe.cfg`: Klipper не даёт одновременно зарегистрировать
-  `[probe]` и `[probe_eddy_current]`. Z-хоуминг продолжает работать через
-  `probe:z_virtual_endstop` из механики, `[safe_z_home]` не меняется.
+  `[probe]` и `[probe_eddy_current]`. Z-хоуминг остаётся на
+  `probe:z_virtual_endstop` из механики, `[safe_z_home]` не меняется (вариант
+  с аппаратным концевиком — в «Гибриде» ниже).
 - `x_offset`/`y_offset` в модуле — плейсхолдеры `0`: их измеряют по факту
-  крепления катушки (в примере Mellow — `21.42`). `z_offset` перезаписывает
-  `SAVE_CONFIG` после калибровки. Катушку ставят в 2–3 мм над соплом, а
-  `descend_z: 2.5` — номинальный зазор сопло–стол, на котором останавливается
-  пробирование.
+  крепления катушки (в примере Mellow — `21.42`). Катушку ставят в 2–3 мм над
+  соплом, а `descend_z: 2.5` — зазор сопло–стол, на котором останавливается
+  пробирование. Собственного `z_offset` у eddy нет: в текущем Klipper это лишь
+  устаревший псевдоним `descend_z`, и обе опции вместе недопустимы (старт
+  падает с `Option 'z_offset' is not valid`); калибровка
+  `PROBE_EDDY_CURRENT_CALIBRATE` + `SAVE_CONFIG` сохраняет таблицу частот
+  `calibrate`.
 - Нужен свежий Klipper с `probe_eddy_current` (`descend_z`, `rapid_scan`).
   Калибровка обязательна до первой печати: `LDC_CALIBRATE_DRIVE_CURRENT` и
   `PROBE_EDDY_CURRENT_CALIBRATE`; макросы
@@ -262,7 +266,8 @@ position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
 Калибровок две, и обе заканчиваются `SAVE_CONFIG` — значения живут только в
 autosave на стенде (`printer.cfg`), в git не попадают:
 
-1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — `z_offset` eddy;
+1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — таблица `calibrate`
+   (частота по высоте);
 2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика.
 
 Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
@@ -271,7 +276,7 @@ autosave на стенде (`printer.cfg`), в git не попадают:
 
 В коммитнутом профиле `v24-350` гибрид уже включён (`features=...,eddy_f`,
 override — в его `machine-extras.cfg`); до калибровки на стенде
-`position_endstop: 0.400` и `z_offset` — плейсхолдеры. Требования те же, что у
+`position_endstop: 0.400` — плейсхолдер. Требования те же, что у
 обычного `eddy_f`: свежий Klipper с `descend_z` и шлейф EDDY-F, подключаемый
 только при снятом питании платы.
 
@@ -1028,13 +1033,17 @@ features=...,eddy_f
   `extruder` MCU.
 - With `eddy_f` (and with `eddy`) the renderer **does not include**
   `std.configs/probe.cfg`: Klipper cannot register `[probe]` and
-  `[probe_eddy_current]` at the same time. Z homing keeps working through the
-  mechanics `probe:z_virtual_endstop`, and `[safe_z_home]` is unchanged.
+  `[probe_eddy_current]` at the same time. Z homing stays on the mechanics
+  `probe:z_virtual_endstop` and `[safe_z_home]` is unchanged (the hardware
+  switch variant is the "Hybrid" section below).
 - `x_offset`/`y_offset` in the module are `0` placeholders: measure them at the
-  actual coil mount (the Mellow example shows `21.42`). `z_offset` is
-  overwritten by `SAVE_CONFIG` after calibration. Mount the coil 2-3 mm above
-  the nozzle; `descend_z: 2.5` is the nominal nozzle-to-bed gap at which a
-  probing attempt stops.
+  actual coil mount (the Mellow example shows `21.42`). Mount the coil 2-3 mm
+  above the nozzle; `descend_z: 2.5` is the nozzle-to-bed gap at which probing
+  stops. The eddy probe has no `z_offset` of its own: in a current Klipper that
+  is only the deprecated alias of `descend_z`, and both options together abort
+  startup with `Option 'z_offset' is not valid`;
+  `PROBE_EDDY_CURRENT_CALIBRATE` + `SAVE_CONFIG` store the `calibrate`
+  frequency table.
 - A current Klipper with `probe_eddy_current` (`descend_z`, `rapid_scan`) is
   required. Calibration is mandatory before the first print:
   `LDC_CALIBRATE_DRIVE_CURRENT` and `PROBE_EDDY_CURRENT_CALIBRATE`; the
@@ -1067,7 +1076,8 @@ nominal nozzle-to-bed gap at which an attempt ends).
 There are two calibrations and both end with `SAVE_CONFIG`; the values live
 only in the bench autosave (`printer.cfg`) and are never committed:
 
-1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the eddy `z_offset`;
+1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the `calibrate`
+   frequency table;
 2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`.
 
 Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
@@ -1076,8 +1086,8 @@ the calibrations is wrong.
 
 The committed `v24-350` profile already enables the hybrid
 (`features=...,eddy_f`, the override lives in its `machine-extras.cfg`); until
-it is calibrated on the bench `position_endstop: 0.400` and `z_offset` are
-placeholders. The requirements match plain `eddy_f`: a current Klipper with
+it is calibrated on the bench `position_endstop: 0.400` is a placeholder. The
+requirements match plain `eddy_f`: a current Klipper with
 `descend_z`, and the EDDY-F harness connected only with the board powered off.
 
 ### Validator checks
