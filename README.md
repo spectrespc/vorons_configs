@@ -475,7 +475,7 @@ python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
 # пересчитать уже существующий модуль на месте (номинал, --force для записи)
 python3 scripts/tmc_calc.py --update-module \
     std.configs/mechanics/tmc/3z-tmc2109-17hs4401s.cfg \
-    --vm 24 --motor 17HS4401S --i-factor 1.0 --force
+    --vm 24 --motor 17HS4401S --current-basis peak --i-factor 1.0 --force
 ```
 
 Правила скрипта:
@@ -484,9 +484,11 @@ python3 scripts/tmc_calc.py --update-module \
   установленным Klipper (`driver_TPFD` есть только у TMC5160);
 - регистры тока (`CS`/`IRUN`, `GLOBALSCALER`) в конфиг не попадают: Klipper
   считает их сам из `run_current`, в выводе они только для сверки;
-- `run_current = min(номинал × --i-factor, предел IC)`; мотор, у которого
-  номинал выше предела IC (например, 2.8 A на TMC2209 с шунтом 0.110 Ом),
-  отклоняется с кодом 2;
+- `run_current = min(номинал × --i-factor, предел IC)`; для X/Y и Z номинал
+  даташита задаётся как `--current-basis peak` и переводится в RMS делением
+  на √2 (0.707 × peak), у экструдеров базис — RMS по умолчанию. Мотор, у
+  которого номинал выше предела IC (например, 1.68 A RMS на TMC2209 с шунтом
+  0.110 Ом), отклоняется с кодом 2;
 - `--write` пишет только внутрь `std.configs/mechanics/tmc/`, без `--force`
   существующий файл не перезаписывается;
 - `--wire-profile` проверяет `xy_step` профиля (1.8° мотор в машину с
@@ -529,16 +531,21 @@ python3 scripts/tmc_calc.py --update-module \
   `std.configs/**` и `printers/*/local/**`, включая недосягаемый из
   `machine.conf` `boards/fly-sb2040.cfg`; `bringup_tmc.py` отказывает на
   stealthchop-секции вместо тихого выбрасывания регистров.
-- Z пересчитан на номинал 1.7 A (`17HS4401S`) при `TBL=0`: `driver_HSTRT: 0`,
-  `driver_HEND: 2`. Экструдеры остаются на фактических 0.55 A и 0.60 A: расчёт
-  идёт под эти токи (`--run-current`), а не под номинал 1.0 A мотора.
+- X/Y и Z пересчитаны от пикового тока даташита в RMS (`--current-basis peak`,
+  `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO 2.8 A peak → 1.9799 A RMS,
+  17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS
+  (`driver_HSTRT: 0`, `driver_HEND: 0`). Экструдеры остаются на фактических
+  0.55/0.60 A RMS: расчёт идёт под эти токи (`--run-current`), а не под номинал
+  1.0 A мотора.
 
 `--run-current A` задаёт `run_current` напрямую; `i_factor` выводится из него и
 печатается как `i_factor_effective`. `--i-factor 0.8` остаётся стартовой точкой
-ручных прогонов; в парке X/Y пересчитываются на номинал (`--i-factor 1.0`, как
-требует bringup), Z — на 1.7 A, экструдеры — на 0.55/0.60 A. Исторические
-0.951/0.800/0.600 A — результат тепловых испытаний, в `docs/tmc/CALCS.md` §8 они
-помечены как устаревшие.
+ручных прогонов; в парке X/Y и Z пересчитываются на номинал
+(`--i-factor 1.0 --current-basis peak`), экструдеры — на 0.55/0.60 A RMS.
+Исторические 0.951/1.697/0.600 A — результат тепловых испытаний, в
+`docs/tmc/CALCS.md` §8 они помечены как устаревшие. На LDO при 1.98 A расчёт
+даёт `HystStart > 20` (TBL уже 0): это следствие 48/55 В и L = 0.6 мГн,
+предупреждение информационное.
 
 ### Первичная настройка машины: `scripts/bringup.sh`
 
@@ -1326,7 +1333,7 @@ python3 scripts/tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 \
 # recompute an existing module in place (nominal current, --force writes it)
 python3 scripts/tmc_calc.py --update-module \
     std.configs/mechanics/tmc/3z-tmc2109-17hs4401s.cfg \
-    --vm 24 --motor 17HS4401S --i-factor 1.0 --force
+    --vm 24 --motor 17HS4401S --current-basis peak --i-factor 1.0 --force
 ```
 
 Script rules:
@@ -1336,9 +1343,11 @@ Script rules:
 - current registers (`CS`/`IRUN`, `GLOBALSCALER`) never appear in the config:
   Klipper derives them from `run_current`, the output shows them for cross-check
   only;
-- `run_current = min(rating × --i-factor, IC limit)`; a motor whose rating is
-  above the IC limit (e.g. 2.8 A on a TMC2209 with a 0.110 Ohm shunt) is refused
-  with exit status 2;
+- `run_current = min(rating × --i-factor, IC limit)`; for X/Y and Z the
+  datasheet rating is passed as `--current-basis peak` and converted to RMS by
+  dividing by sqrt(2) (0.707 x peak), while the extruders use the RMS default.
+  A motor whose rating is above the IC limit (e.g. 1.68 A RMS on a TMC2209 with
+  a 0.110 Ohm shunt) is refused with exit status 2;
 - `--write` only writes inside `std.configs/mechanics/tmc/` and refuses to
   overwrite without `--force`;
 - `--wire-profile` checks the profile `xy_step` (a 1.8 degree motor cannot be
@@ -1383,17 +1392,21 @@ Script rules:
   `printers/*/local/**`, including `boards/fly-sb2040.cfg`, which no
   `machine.conf` can reach. `bringup_tmc.py` refuses a StealthChop section
   instead of silently dropping the chopper registers.
-- Z is recalculated at the 1.7 A rating (`17HS4401S`) with `TBL=0`:
-  `driver_HSTRT: 0`, `driver_HEND: 2`. The extruders keep their actual 0.55 A
-  and 0.60 A: the calculation uses those currents (`--run-current`), not the
-  motor's 1.0 A rating.
+- X/Y and Z are recalculated from the datasheet peak into RMS
+  (`--current-basis peak`, `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO
+  2.8 A peak → 1.9799 A RMS, 17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S
+  1.7 A peak → 1.2021 A RMS (`driver_HSTRT: 0`, `driver_HEND: 0`). The
+  extruders keep their actual 0.55/0.60 A RMS: the calculation uses those
+  currents (`--run-current`), not the motor's 1.0 A rating.
 
 `--run-current A` sets `run_current` directly; `i_factor` is derived from it and
 printed as `i_factor_effective`. `--i-factor 0.8` remains a starting point for
-manual runs; in the fleet X/Y are recalculated at the rating (`--i-factor 1.0`,
-which bringup requires), Z at 1.7 A, and the extruders at 0.55/0.60 A. The
-historical 0.951/0.800/0.600 A values came from thermal testing and are marked
-as outdated in §8 of `docs/tmc/CALCS.md`.
+manual runs; in the fleet X/Y and Z are recalculated at the rating
+(`--i-factor 1.0 --current-basis peak`), and the extruders at 0.55/0.60 A RMS.
+The historical 0.951/1.697/0.600 A values came from thermal testing and are
+marked as outdated in §8 of `docs/tmc/CALCS.md`. On the LDO at 1.98 A the
+calculation reports `HystStart > 20` (TBL is already 0): that follows from
+48/55 V and L = 0.6 mH, and the warning is informational.
 
 ### Machine commissioning: `scripts/bringup.sh`
 

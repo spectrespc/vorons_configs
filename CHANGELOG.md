@@ -123,6 +123,22 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Ток X/Y и Z считается от пикового значения даташита в RMS:
+  `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`. У `tmc_calc.py` появился
+  `--current-basis peak` (по умолчанию `rms`), `bringup_tmc.py` и `tmc_tune.py`
+  передают его для рельсов. Пересчитаны LDO 2.8 A peak → 1.9799 A RMS, 17HM19
+  1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS
+  (`HSTRT/HEND 0/0`); экструдеры остаются на 0.55/0.60 A RMS. На LDO при
+  1.98 A расчёт даёт `HystStart > 20` — предупреждение, а не ошибка.
+  **EN:** X/Y and Z currents are derived from the datasheet peak into RMS:
+  `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`. `tmc_calc.py` gained
+  `--current-basis peak` (default `rms`), and `bringup_tmc.py`/`tmc_tune.py`
+  pass it for the rails. Recalculated: LDO 2.8 A peak → 1.9799 A RMS, 17HM19
+  1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS
+  (`HSTRT/HEND 0/0`); the extruders stay at 0.55/0.60 A RMS. On the LDO at
+  1.98 A the calculation reports `HystStart > 20`, which is a warning, not an
+  error.
+
 - **RU:** Весь парк переведён в SpreadCycle с явным `stealthchop_threshold: 0`
   (X/Y и экструдеры и раньше работали в SpreadCycle по умолчанию Klipper —
   ключа просто не было). Z-модули пересчитаны на номинал 1.7 A

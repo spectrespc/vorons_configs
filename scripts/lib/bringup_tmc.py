@@ -15,8 +15,10 @@ supply rail, and calls ``tmc_calc.py --update-module`` for the whole file:
 The ``motor_by_module`` table is not used here: machine.conf names the motor
 explicitly, so the module name no longer has to be parsed.
 
-The current is ``--i-factor 1.0`` (motor nominal) for X/Y and Z; the extruders
-keep the current of their live section (0.55/0.60 A) and are calculated with
+The current is ``--i-factor 1.0 --current-basis peak`` for X/Y and Z: the
+datasheet current is per-phase peak, while Klipper's ``run_current`` is RMS, so
+the rails run at ``rated_peak / sqrt(2)`` (0.707 x peak).  The extruders keep
+the current of their live section (0.55/0.60 A) and are calculated with
 ``--run-current``.  The TBL/TOFF chopper inputs come from the profile
 (``xy_tbl/xy_toff``, ``z_tbl/z_toff``, ``e_tbl/e_toff``).  Only the velocity
 pair is searched later, by ``tmc_tune.py``.
@@ -361,6 +363,7 @@ def build_plan(repo: str, profile: str, dest: str) -> list[dict]:
             "toff": toff,
             "mode": mode,
             "run_current_active": run_current_active,
+            "current_basis": "peak" if axis != "e" else "rms",
         }
         if mode == "stealthchop":
             raise PlanError(
@@ -383,15 +386,16 @@ def build_plan(repo: str, profile: str, dest: str) -> list[dict]:
 
 
 def current_args(row: dict) -> list[str]:
-    """Explicit E current, or the nominal factor for X/Y and Z.
+    """Explicit E current, or the peak-to-RMS nominal for X/Y and Z.
 
-    X/Y and Z are recomputed at ``--i-factor 1.0`` (the fleet rule); the
-    extruders keep their section current, because 0.55/0.60 A are deliberate
-    limits, not a fraction of the motor rating.
+    X/Y and Z are recomputed from the datasheet peak at
+    ``--i-factor 1.0 --current-basis peak``; the extruders keep their section
+    current, because 0.55/0.60 A are deliberate RMS limits, not a fraction of
+    the motor rating.
     """
     if row["axis"] == "e" and row.get("run_current_active") is not None:
         return ["--run-current", "%.4g" % float(row["run_current_active"])]
-    return ["--i-factor", "1.0"]
+    return ["--i-factor", "1.0", "--current-basis", "peak"]
 
 
 def chopper_args(row: dict) -> list[str]:
@@ -479,7 +483,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
             row["hend"] = chopper.get("hend")
             row["current_source"] = (
                 "run_current %.4g A" % float(row["run_current_active"])
-                if row["axis"] == "e" else "i-factor 1.0"
+                if row["axis"] == "e" else "i-factor 1.0 (peak→RMS)"
             )
             row["warnings"] = payload["warnings"]
     if args.json:
@@ -604,7 +608,7 @@ def selftest() -> int:
         if row["axis"] == "e" and abs(payload["run_current"] - 0.55) > 1e-9:
             bad += 1
             print("MISMATCH: E run_current=%r" % payload["run_current"])
-        if row["axis"] == "z" and abs(payload["run_current"] - 1.7) > 1e-9:
+        if row["axis"] == "z" and abs(payload["run_current"] - 1.2021) > 1e-9:
             bad += 1
             print("MISMATCH: Z run_current=%r" % payload["run_current"])
     print("bringup_tmc selftest: %s" % ("FAILED" if bad else "ok"))

@@ -99,6 +99,8 @@ DRIVER_KEYS = {
 DRIVER_LABELS = {"tmc2209": "TMC2209", "tmc5160": "TMC5160"}
 
 # TBL blank-time formulas, seconds (xlsx C13 on both Chopper sheets).
+SQRT2 = math.sqrt(2.0)
+
 TBL_CHOICES = {
     "tmc2209": (0, 1, 2, 3),
     "tmc5160": (0, 1, 2, 3),
@@ -480,6 +482,19 @@ def selftest_update() -> int:
     except CalcError as exc:
         check("zero rated current refused", "positive" in str(exc), str(exc))
 
+    peak_args = build_parser().parse_args(
+        ["--driver", "tmc2209", "--vm", "24", "--motor", "17HS4401S",
+         "--mode", "spreadcycle", "--current-basis", "peak",
+         "--i-factor", "1.0", "--tbl", "0", "--toff", "3"]
+    )
+    peak = calculate(peak_args, motors)
+    check("peak basis converts 1.7 A peak to 1.2021 A RMS",
+          abs(float(peak["run_current"]) - 1.2021) < 1e-9,
+          str(peak["run_current"]))
+    check("peak basis reports the RMS rating",
+          abs(float(peak["rated_current_rms"]) - 1.7 / SQRT2) < 1e-9,
+          str(peak["rated_current_rms"]))
+
     held = (
         "[tmc2209 extruder]\n"
         "uart_pin: extruder:EXT_UART\n"
@@ -716,15 +731,24 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
             % ("Supply voltage", VM_WARN_HIGH[driver])
         )
 
+    basis = getattr(args, "current_basis", "rms")
+    if basis not in ("rms", "peak"):
+        raise CalcError("--current-basis must be rms or peak")
+    # Klipper's run_current is RMS.  X/Y and Z datasheets quote the per-phase
+    # peak current, so the rails pass --current-basis peak: rated RMS is
+    # peak / sqrt(2) (0.707 x peak).  The extruders always run at a measured
+    # RMS current and keep the default basis.
+    i_rated_rms = i_rated / SQRT2 if basis == "peak" else i_rated
+
     ic_limit = ic_current_limit_rms(driver, rsense)
-    if i_rated > ic_limit + 1e-9:
+    if i_rated_rms > ic_limit + 1e-9:
         raise CalcError(
-            "motor rated current %.2f A is above the %s limit of %.2f A RMS at "
-            "Rsense=%.3f Ohm: use a smaller --rsense or a stronger driver"
-            % (i_rated, DRIVER_LABELS[driver], ic_limit, rsense)
+            "motor rated current %.2f A (%s) is above the %s limit of %.2f A "
+            "RMS at Rsense=%.3f Ohm: use a smaller --rsense or a stronger driver"
+            % (i_rated, basis, DRIVER_LABELS[driver], ic_limit, rsense)
         )
     requested, i_factor_effective = resolve_request_current(
-        driver, i_rated, args.i_factor, args.run_current
+        driver, i_rated_rms, args.i_factor, args.run_current
     )
     if args.run_current is not None and requested > ic_limit + 1e-9:
         raise CalcError(
@@ -735,10 +759,10 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
     run_current = round(min(requested, ic_limit), 4)
     if requested > ic_limit + 1e-9:
         warnings.append(
-            "rated current %.2f A x %.2f = %.2f A exceeds the %s limit for "
-            "Rsense=%.3f Ohm (%.2f A RMS): run_current clamped"
-            % (i_rated, i_factor_effective, requested, DRIVER_LABELS[driver],
-               rsense, ic_limit)
+            "rated current %.2f A RMS x %.2f = %.2f A exceeds the %s limit "
+            "for Rsense=%.3f Ohm (%.2f A RMS): run_current clamped"
+            % (i_rated_rms, i_factor_effective, requested,
+               DRIVER_LABELS[driver], rsense, ic_limit)
         )
     if run_current > KLIPPER_MAX_CURRENT[driver]:
         raise CalcError(
@@ -859,6 +883,8 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
         "vm": args.vm,
         "sense_resistor": rsense,
         "rated_current_a": i_rated,
+        "rated_current_rms": i_rated_rms,
+        "current_basis": basis,
         "step_angle": step_angle,
         "inductance_mh": inductance_mh,
         "resistance_ohm": resistance_ohm,
@@ -999,8 +1025,14 @@ def render_text(result: dict[str, object], sections: list[dict[str, object]]) ->
     out.append("# %s + %s, VM=%s V, Rsense=%s Ohm, режим %s"
                % (DRIVER_LABELS[driver], motor, _fmt(result["vm"]),
                   _fmt(result["sense_resistor"]), result["mode"]))
-    out.append("# run_current=%s A RMS (номинал %s A x %s, предел IC %s A)"
-               % (_fmt(result["run_current"]), _fmt(result["rated_current_a"]),
+    if result.get("current_basis") == "peak":
+        rating = ("номинал %s A peak = %s A RMS"
+                  % (_fmt(result["rated_current_a"]),
+                     _fmt(result["rated_current_rms"])))
+    else:
+        rating = "номинал %s A RMS" % _fmt(result["rated_current_a"])
+    out.append("# run_current=%s A RMS (%s x %s, предел IC %s A)"
+               % (_fmt(result["run_current"]), rating,
                   _fmt(result["i_factor"]), round(float(result["current_limit_rms"]), 3)))
     regs = result["registers"]
     if driver == "tmc2209":
@@ -1702,6 +1734,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--r-ohm", type=float, help="сопротивление фазы, Ом")
     parser.add_argument("--vm", type=float, help="напряжение питания драйвера, В")
     parser.add_argument("--rsense", type=float, help="шунт, Ом (по умолчанию 2209: 0.110, 5160: 0.075)")
+    parser.add_argument("--current-basis", choices=("rms", "peak"),
+                        default="rms",
+                        help="как трактовать номинальный ток: RMS (по умолчанию) "
+                             "или peak; peak переводится в RMS делением на √2")
     parser.add_argument("--i-factor", type=float, default=0.8,
                         help="доля номинального тока (по умолчанию 0.8); "
                              "игнорируется при --run-current")

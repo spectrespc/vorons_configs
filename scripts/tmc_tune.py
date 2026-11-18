@@ -375,7 +375,7 @@ def chopper_pair(machine: dict[str, str], axis: str) -> tuple[int, int]:
 
 def tmc_calc_settings(
     motor: str, driver: str, vm: int, tbl: int | None = None,
-    toff: int | None = None,
+    toff: int | None = None, basis: str = "peak",
 ) -> dict[str, object]:
     """Current and registers from tmc_calc.py (single source).
 
@@ -384,7 +384,8 @@ def tmc_calc_settings(
     """
     command = [
         sys.executable, TMC_CALC, "--driver", driver, "--motor", motor,
-        "--vm", str(vm), "--i-factor", "1.0", "--json",
+        "--vm", str(vm), "--i-factor", "1.0", "--current-basis", basis,
+        "--json",
     ]
     if tbl is not None:
         command += ["--tbl", str(tbl), "--tbl-source", "profile"]
@@ -1071,7 +1072,8 @@ def apply_result(profile_dir: str, machine: dict[str, str],
         sys.executable, TMC_CALC, "--update-module", module,
         "--vm", str(railway_values(machine)[0]),
         "--motor", motor_for_driver(machine),
-        "--i-factor", "1.0", "--tbl", str(tbl), "--toff", str(toff),
+        "--i-factor", "1.0", "--current-basis", "peak",
+        "--tbl", str(tbl), "--toff", str(toff),
         "--tbl-source", "profile", "--toff-source", "profile",
         "--sections", "stepper_x,stepper_y", "--force",
     ]
@@ -1121,7 +1123,8 @@ def apply_z_result(
         "--driver", str(context["driver"]),
         "--vm", str(context["vm"]),
         "--motor", str(context["motor"]),
-        "--i-factor", "1.0", "--tbl", str(tbl), "--toff", str(toff),
+        "--i-factor", "1.0", "--current-basis", "peak",
+        "--tbl", str(tbl), "--toff", str(toff),
         "--tbl-source", "profile", "--toff-source", "profile",
         "--force",
     ]

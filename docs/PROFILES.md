@@ -183,7 +183,8 @@ python3 scripts/check_config.py --stale-check
 
 Конвейер: `deploy → tmc → motion → z-motion → pid-e → pid-b`. Этап `tmc` берёт
 моторы из `xy_motor`/`z_motor`/`e_motor`, рейлы `vm_xy`/`vm_ze` и входы чоппера
-`*_tbl/*_toff`; X/Y и Z пересчитываются на `--i-factor 1.0`, экструдеры — на
+`*_tbl/*_toff`; X/Y и Z пересчитываются на
+`--i-factor 1.0 --current-basis peak` (RMS = peak/√2), экструдеры — на
 фактический ток секции (`--run-current`). Этап `z-motion` подбирает
 `max_z_velocity`/`max_z_accel` макросом `TEST_SPEED_Z`: на каждого кандидата —
 scratch-файл в `std.config.local`, рестарт, повторное применение TMC, `G28`,

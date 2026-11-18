@@ -42,10 +42,12 @@ sha256sum docs/tmc/*.xlsx
 | MOONS-CSE14HRA1L410A-01 | 1.0 A/фаза, 1.9 Ω ±10 %, 1.41 мГн ±20 %, 10 Н·см, 1.8° | <https://biqu.equipment/products/moons-cse14hra1l410a-01-36-stepper-motor> |
 
 Значения в `motors.json` взяты из этих документов; поле `source` у каждой
-записи обязательно и проверяется скриптом при загрузке базы. Запись
+записи обязательно и проверяется скриптом при загрузке базы. Для X/Y и Z это
+**пиковый** ток фазы: рельсы считаются с `--current-basis peak`, и `run_current`
+Klipper (RMS) равен `I_peak / √2 ≈ 0.707 · I_peak`. Запись
 `MOONS-CSE14HRA1L410A-01` — мотор экструдера HGX 8T (NEMA14, 36 мм, шестерня
-8T). Её `rated_current_a` (1.0 A), `inductance_mh` и `resistance_ohm` нужны только
-для **расчёта чоппер-регистров** (`driver_HSTRT/HEND`) при фактических токах
+8T). Её `rated_current_a` (1.0 A, RMS), `inductance_mh` и `resistance_ohm` нужны
+только для **расчёта чоппер-регистров** (`driver_HSTRT/HEND`) при фактических токах
 секций: `extruder` 0.55 A и `extruder_stepper ext-extruder` 0.60 A. Ток
 экструдеров до номинала не повышается — `--run-current` задаёт его явно, а
 `rated_current_a` используется лишь для вывода `i_factor_effective`. Таблица `motor_by_module` в том же
