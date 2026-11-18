@@ -35,12 +35,21 @@
     "source": "https://biqu.equipment/products/moons-cse14hra1l410a-01-36-stepper-motor",
     "note": "MOONS' NEMA 14, 36 mm, 8T шестерня (HGX/ProtoXtruder). Даташит: 1.0 A/фаза, 1.9 В, 1.9 Ом ±10 %, 1.41 мГн ±20 %, момент 100 мН·м (10 Н·см), 1.8°. Парк — экструдер HGX 8T"
   },
-
   "motor_by_module": {
     "tmc5160-17hm19-1684": "17HM19-1684",
     "tmc5160-ldo-42sth48-2804ac": "LDO-42STH48-2804AC",
     "tmc2209-17hm19-1684": "17HM19-1684",
     "tmc2109-17hs4401s": "17HS4401S",
-    "tmc2209-17hs4401s": "17HS4401S"
+    "tmc2209-17hs4401s": "17HS4401S",
+    "tmc2209-17hs19-2004s1": "17HS19-2004S1"
+  },
+  "17HS19-2004S1": {
+    "rated_current_a": 2.0,
+    "inductance_mh": 3.0,
+    "resistance_ohm": 1.4,
+    "step_angle_deg": 1.8,
+    "holding_torque_ncm": 59,
+    "source": "https://www.omc-stepperonline.com/download/17HS19-2004S1.pdf",
+    "note": "StepperOnline/OMC 17HS19-2004S1, NEMA 17, 48 mm. Даташит: 2.0 A/фаза, 1.4 Ом, 3.0 мГн, 59 Н·см (парк — Z на v24 от 250 мм)"
   }
 }

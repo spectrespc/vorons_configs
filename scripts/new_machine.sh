@@ -51,7 +51,8 @@ Optional:
                       (default follows xy-step: 17HM19-1684 / LDO-42STH48-2804AC)
       --xy-driver IC  X/Y driver IC: tmc5160 (default) or tmc2209
       --z-driver IC   Z driver IC (default: tmc2109 for trident, tmc2209 for v24)
-      --z-motor NAME  Z motor key from docs/tmc/motors.json (default: 17HS4401S)
+      --z-motor NAME  Z motor key from docs/tmc/motors.json
+                      (default: 17HS4401S; v24 250+ — 17HS19-2004S1)
       --e-motor NAME  extruder motor key from docs/tmc/motors.json
                       (default: MOONS-CSE14HRA1L410A-01, the fleet HGX motor)
       --extruder-motor NAME
@@ -129,7 +130,13 @@ if [[ -z "$XY_MOTOR" ]]; then
 fi
 if [[ -z "$XY_DRIVER" ]]; then XY_DRIVER="tmc5160"; fi
 if [[ -z "$Z_DRIVER" ]]; then Z_DRIVER="$DEFAULT_Z_DRIVER"; fi
-if [[ -z "$Z_MOTOR" ]]; then Z_MOTOR="17HS4401S"; fi
+if [[ -z "$Z_MOTOR" ]]; then
+  if [[ "$MODEL" == "v24" && "$SIZE" -ge 250 ]]; then
+    Z_MOTOR="17HS19-2004S1"
+  else
+    Z_MOTOR="17HS4401S"
+  fi
+fi
 if [[ -z "$E_MOTOR" ]]; then E_MOTOR="MOONS-CSE14HRA1L410A-01"; fi
 
 # Effective board: the explicit --board or the per-model default.  It decides

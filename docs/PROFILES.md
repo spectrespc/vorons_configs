@@ -241,7 +241,7 @@ vm_xy=48
 vm_ze=24
 xy_tbl=0
 xy_toff=3
-z_tbl=2
+z_tbl=0
 z_toff=3
 e_tbl=0
 e_toff=3
@@ -268,7 +268,7 @@ board=manta-m8p
 xy_step=1.8
 xy_motor=LDO-42STH48-2804AC
 xy_driver=tmc5160
-z_motor=17HS4401S
+z_motor=17HS19-2004S1
 z_driver=tmc2209
 e_motor=MOONS-CSE14HRA1L410A-01
 toolhead=sht36-v3
@@ -277,7 +277,7 @@ vm_xy=55
 vm_ze=24
 xy_tbl=0
 xy_toff=3
-z_tbl=2
+z_tbl=0
 z_toff=3
 e_tbl=0
 e_toff=3
@@ -296,7 +296,7 @@ features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
 2. Переименуйте `extruder_motor` в `e_motor`.
 3. Добавьте `kinematics`, `z_count`, `leveling` по таблице модели.
 4. Добавьте `z_motor`/`z_driver` (trident: `17HS4401S`/`tmc2109`,
-   v24: `17HS4401S`/`tmc2209`).
+   v24 < 250: `17HS4401S`/`tmc2209`, v24 250+: `17HS19-2004S1`/`tmc2209`).
 5. Убедитесь, что `board`, `xy_step`, `vm_xy`, `vm_ze` заданы явно.
 6. Перерендерите и проверьте:
 

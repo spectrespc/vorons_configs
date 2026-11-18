@@ -57,7 +57,9 @@ MODEL_PROFILE = {
     "trident": ("corexy", 3, "z_tilt"),
     "v24": ("corexy", 4, "quad_gantry_level"),
 }
-# Z driver/motor pair of the archetype (fleet hardware).
+# Z driver/motor pair of the archetype (fleet hardware).  The v24 line uses
+# the stronger 17HS19-2004S1 from 250 mm and up.
+V24_Z_MOTOR_FROM = 250
 DEFAULT_Z_PAIR = {
     "trident": ("tmc2109", "17HS4401S"),
     "v24": ("tmc2209", "17HS4401S"),
@@ -433,6 +435,26 @@ def check_model_profile(
         )
 
 
+def default_z_pair(model: str, size: object) -> tuple[str, str]:
+    """Default Z driver/motor pair of a model and size.
+
+    >>> default_z_pair("v24", 250)
+    ('tmc2209', '17HS19-2004S1')
+    >>> default_z_pair("v24", 200)
+    ('tmc2209', '17HS4401S')
+    >>> default_z_pair("trident", 350)
+    ('tmc2109', '17HS4401S')
+    """
+    driver, motor = DEFAULT_Z_PAIR[model]
+    try:
+        large = int(size) >= V24_Z_MOTOR_FROM
+    except (TypeError, ValueError):
+        large = False
+    if model == "v24" and large:
+        motor = "17HS19-2004S1"
+    return driver, motor
+
+
 def check_feature_rules(features: list[str], toolhead: str | None) -> None:
     """Reject mutually exclusive features and eddy probes without a toolhead.
 
@@ -702,8 +724,9 @@ def validate(values: dict[str, str], strict: bool = True) -> dict[str, object]:
             % (xy_driver, ", ".join(XY_DRIVER_ICS))
         )
 
-    z_driver = values.get("z_driver") or DEFAULT_Z_PAIR[model][0]
-    z_motor = values.get("z_motor") or DEFAULT_Z_PAIR[model][1]
+    default_z_driver, default_z_motor = default_z_pair(model, size)
+    z_driver = values.get("z_driver") or default_z_driver
+    z_motor = values.get("z_motor") or default_z_motor
     known_motors = motor_names()
     if known_motors and z_motor not in known_motors:
         raise ProfileError(

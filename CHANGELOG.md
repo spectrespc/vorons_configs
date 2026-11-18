@@ -123,6 +123,19 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** На v24 от 250 мм Z переведён на `17HS19-2004S1` (2.0 A peak →
+  1.4142 A RMS, `HSTRT/HEND = 0/0`, `TBL=0`): добавлен модуль
+  `4z-tmc2209-17hs19-2004s1.cfg`, профиль `v24-350` переключён на него, а
+  `render_profile.py`/`new_machine.sh` выбирают мотор Z по модели и размеру
+  (v24 ≥ 250 — `17HS19-2004S1`, иначе `17HS4401S`). Мотор добавлен в
+  `docs/tmc/motors.json` с даташитными 2.0 A/1.4 Ом/3.0 мГн.
+  **EN:** On v24 from 250 mm the Z motors are `17HS19-2004S1` (2.0 A peak ->
+  1.4142 A RMS, `HSTRT/HEND = 0/0`, `TBL=0`): the new
+  `4z-tmc2209-17hs19-2004s1.cfg` module is used by the `v24-350` profile, and
+  `render_profile.py`/`new_machine.sh` pick the Z motor by model and size
+  (v24 >= 250 -> `17HS19-2004S1`, otherwise `17HS4401S`). The motor is in
+  `docs/tmc/motors.json` with the datasheet 2.0 A/1.4 Ohm/3.0 mH values.
+
 - **RU:** Ток X/Y и Z считается от пикового значения даташита в RMS:
   `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`. У `tmc_calc.py` появился
   `--current-basis peak` (по умолчанию `rms`), `bringup_tmc.py` и `tmc_tune.py`
