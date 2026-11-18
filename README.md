@@ -289,12 +289,18 @@ position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
 в eddy-модуле остаётся страховкой пробирования (номинальный зазор
 сопло–стол, на котором попытка останавливается).
 
-Калибровок две, и обе заканчиваются `SAVE_CONFIG` — значения живут только в
-autosave на стенде (`printer.cfg`), в git не попадают:
+Калибровок две:
 
 1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — таблица `calibrate`
-   (частота по высоте);
-2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика.
+   (частота по высоте); её сохраняет `SAVE_CONFIG`, и живёт она только в
+   autosave стенда (`printer.cfg`), в git не попадает;
+2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика. Это машинный факт, и
+   он вписывается в `machine-extras.cfg`: `SAVE_CONFIG` не сохраняет опцию,
+   которая уже задана во включаемом файле, и падает с `SAVE_CONFIG section
+   'stepper_z' option 'position_endstop' conflicts with included value`.
+   Значение берут из вывода команды (или из
+   `configfile.save_config_pending_items`), вписывают в `machine-extras.cfg`
+   профиля и деплоят.
 
 Калибровать eddy нужно с `ACCEPT` на 0.3–0.5 мм выше соприкосновения сопла:
 если катушка стоит низко над соплом (≈1 мм), точка контакта попадает в
@@ -877,9 +883,9 @@ Klipper, прошивает платы, запускает Klipper и запис
   это `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` видит `stepper_z`,
   LDC1612 отвечает по адресу `43`, в логе нет `Registering duplicate object` и
   `Timer too close`). Таблица `calibrate` eddy снята на стенде (диапазон
-  ~277 кГц, шум ~1 мкм при 1–3 мм) и сохранена в autosave, но нуль eddy ещё не
-  сведён со столом: `position_endstop` остаётся плейсхолдером до
-  `Z_ENDSTOP_CALIBRATE`, после чего расхождение убирается
+  ~277 кГц, шум ~1 мкм при 1–3 мм) и сохранена в autosave;
+  `position_endstop` концевика откалиброван и лежит в `machine-extras.cfg`
+  (`-0.030`). Нуль eddy сводится со столом через `PROBE` +
   `Z_OFFSET_APPLY_PROBE`; прогоны QGL/mesh и первый слой — за оператором.
   `check_config.py` ловит обе типовые ошибки такой сборки — `[probe]` вместе с
   `[probe_eddy_current]` и физический `endstop_pin` у `[stepper_z]` без
@@ -1187,12 +1193,18 @@ position_endstop: 0.400 # placeholder until Z_ENDSTOP_CALIBRATE
 `descend_z: 2.5` in the eddy module stays the safety stop of probing (the
 nominal nozzle-to-bed gap at which an attempt ends).
 
-There are two calibrations and both end with `SAVE_CONFIG`; the values live
-only in the bench autosave (`printer.cfg`) and are never committed:
+There are two calibrations:
 
 1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the `calibrate`
-   frequency table;
-2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`.
+   frequency table; `SAVE_CONFIG` stores it in the bench autosave
+   (`printer.cfg`), so it never reaches git;
+2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`. That is a machine
+   fact and goes into `machine-extras.cfg`: `SAVE_CONFIG` refuses to persist an
+   option that an included file already sets and fails with `SAVE_CONFIG
+   section 'stepper_z' option 'position_endstop' conflicts with included
+   value`. Take the value from the command output (or from
+   `configfile.save_config_pending_items`), put it into the profile's
+   `machine-extras.cfg` and deploy.
 
 Calibrate the eddy with `ACCEPT` 0.3-0.5 mm above nozzle contact: when the coil
 sits low over the nozzle (about 1 mm), the contact point lands in the flat part
@@ -1777,10 +1789,10 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   the LDC1612 answers at address `43`, and the log has no
   `Registering duplicate object` or `Timer too close`). The eddy `calibrate`
   table is measured on the bench (~277 kHz span, ~1 um of noise at 1-3 mm) and
-  stored in the autosave, but the eddy zero is not yet matched to the bed:
-  `position_endstop` stays a placeholder until `Z_ENDSTOP_CALIBRATE`, after
-  which the difference is removed with `Z_OFFSET_APPLY_PROBE`; the QGL/mesh
-  runs and the first layer are still with the operator. `check_config.py` now
+  stored in the autosave; the switch `position_endstop` is calibrated and lives
+  in `machine-extras.cfg` (`-0.030`). The eddy zero is matched to the bed with
+  `PROBE` + `Z_OFFSET_APPLY_PROBE`; the QGL/mesh runs and the first layer are
+  still with the operator. `check_config.py` now
   catches the two typical mistakes of such a build: `[probe]` together with
   `[probe_eddy_current]`, and a physical `[stepper_z] endstop_pin` without
   `position_endstop`.
