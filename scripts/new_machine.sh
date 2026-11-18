@@ -256,6 +256,15 @@ cat > "$PROFILE_DIR/printer.cfg" <<'EOF'
 # The include list itself is generated from machine.conf into profile.cfg.
 [include profile.cfg]
 
+# Hybrid Z only: when [stepper_z] homes on a hardware endstop instead of
+# probe:z_virtual_endstop, Klipper needs position_endstop to boot. Uncomment the
+# block and then calibrate with Z_ENDSTOP_CALIBRATE + SAVE_CONFIG, which
+# comments the line out and keeps the real value in the autosave. The fleet
+# default is -0.520. Never set it next to probe:z_virtual_endstop: Klipper does
+# not read it there and rejects the section as an invalid option.
+#[stepper_z]
+#position_endstop: -0.520
+
 # Runtime overrides (UUIDs, PID, input shaper, extruder calibration) come last.
 [include std.config.local/*.cfg]
 EOF

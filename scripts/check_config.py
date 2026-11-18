@@ -23,8 +23,9 @@ Exit status: 1 if at least one error was found, otherwise 0.
 Diagnostics:
   ERROR    missing/recursive include, parse error, two probe objects
            ([probe] + [probe_eddy_current ...]), physical [stepper_z]
-           endstop without position_endstop, active stealthchop_threshold
-           >= 1000 (the fleet invariant is SpreadCycle)
+           endstop without position_endstop, position_endstop next to a
+           virtual endstop, active stealthchop_threshold >= 1000 (the fleet
+           invariant is SpreadCycle)
   WARNING  duplicate section name, repeated option (last-wins), TMC section
            without an explicit stealthchop_threshold
   NOTICE   module .cfg under std.configs/ or std.macros/ that is not
@@ -946,21 +947,32 @@ class Checker:
 
     # -- Z endstop -----------------------------------------------------
     def check_z_endstop(self) -> None:
-        """Require position_endstop when [stepper_z] homes on a physical pin.
+        """Validate [stepper_z] position_endstop against the endstop type.
 
-        Klipper accepts a missing position_endstop only when Z homes through
-        the probe ("probe:z_virtual_endstop"). A machine that parks Z on a
-        hardware switch - the hybrid eddy setup, or an eddy machine whose
-        toolhead has its own endstop - must therefore carry the calibrated
-        value in [stepper_z]; without it Klipper refuses to load the section.
+        Klipper reads position_endstop only for a physical endstop; with
+        "probe:z_virtual_endstop" the value comes from the probe object and an
+        explicit position_endstop is never consumed, after which Klipper
+        rejects the section with "Option 'position_endstop' is not valid".
+        A physical endstop without the option is the opposite mistake: Klipper
+        then refuses to load the section without a homing reference.
         """
         raw = self._opt("stepper_z", "endstop_pin")
         if raw is None:
             return
         endstop = raw.strip()
-        if not endstop or endstop.lstrip("!^~").startswith("probe:"):
+        if not endstop:
             return
-        if self._opt("stepper_z", "position_endstop") is not None:
+        position = self._opt("stepper_z", "position_endstop")
+        if endstop.lstrip("!^~").startswith("probe:"):
+            if position is not None:
+                self.error(
+                    "stepper_z: position_endstop %r is set next to the virtual "
+                    "endstop %r; Klipper never reads it there and rejects the "
+                    "section (\"Option 'position_endstop' is not valid\")"
+                    % (position, endstop)
+                )
+            return
+        if position is not None:
             return
         self.error(
             "stepper_z: endstop_pin %r is a physical endstop but "

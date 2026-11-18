@@ -284,9 +284,9 @@ features=...,eddy_f
 [stepper_z]
 endstop_pin: !SENS_2
 
-# printer.cfg (seed) — плейсхолдер до калибровки
+# printer.cfg (seed) — дефолт профиля, затем калибровка
 [stepper_z]
-position_endstop: 0.400
+position_endstop: -0.520
 ```
 
 `position_endstop` обязателен: Klipper принимает его отсутствие только при
@@ -313,7 +313,7 @@ included value`), а `printer.cfg` — главный файл: при `SAVE_CON
 
 `printer.cfg` — seed: `deploy_configs.sh` создаёт его только на новой машине и
 никогда не перезаписывает. Если файл пересоздан, Klipper поднимется на
-плейсхолдере `0.400`, и калибровку концевика нужно выполнить заново до первой
+плейсхолдере `-0.520`, и калибровку концевика нужно выполнить заново до первой
 печати.
 
 Калибровать eddy нужно с `ACCEPT` на 0.3–0.5 мм выше соприкосновения сопла:
@@ -340,7 +340,7 @@ Z=0 по бумаге, после чего расхождение `PROBE` с н�
 
 В коммитнутом профиле `v24-350` гибрид уже включён (`features=...,eddy_f`,
 override — в его `machine-extras.cfg`), а `position_endstop` в его
-`printer.cfg` — плейсхолдер `0.400` до калибровки на стенде. Требования те же,
+`printer.cfg` — дефолт `-0.520` до калибровки на стенде. Требования те же,
 что у обычного `eddy_f`: свежий Klipper с `descend_z` и шлейф EDDY-F,
 подключаемый
 только при снятом питании платы.
@@ -359,6 +359,9 @@ override — в его `machine-extras.cfg`), а `position_endstop` в его
   `[probe]` в файл платы: парсер такие дубликаты молча сливает.
 - **ERROR** — у `[stepper_z]` задан физический `endstop_pin` (не `probe:…`),
   а `position_endstop` нет: Klipper требует его для аппаратного Z-концевика.
+  Обратная ошибка тоже ловится: `position_endstop` рядом с
+  `probe:z_virtual_endstop` — Klipper такую опцию не читает и падает на
+  `Option 'position_endstop' is not valid in section 'stepper_z'`.
 - **WARNING** — `[mcu NAME]` объявлен, но на него нет ни одной ссылки: признак
   осиротевшей секции от платы, которой на машине нет. Неявный `mcu` и `host`
   предупреждение не вызывают.
@@ -1211,9 +1214,9 @@ The recipe keeps `endstop_pin` in the profile's `machine-extras.cfg`
 [stepper_z]
 endstop_pin: !SENS_2
 
-# printer.cfg (seed), placeholder until calibration
+# printer.cfg (seed), profile default before calibration
 [stepper_z]
-position_endstop: 0.400
+position_endstop: -0.520
 ```
 
 `position_endstop` is mandatory: Klipper accepts its absence only with
@@ -1239,7 +1242,7 @@ There are two calibrations:
 
 `printer.cfg` is a seed: `deploy_configs.sh` creates it only on a new machine
 and never overwrites it. If the file is recreated, Klipper boots on the
-`0.400` placeholder and the endstop has to be calibrated again before the first
+`-0.520` placeholder and the endstop has to be calibrated again before the first
 print.
 
 Calibrate the eddy with `ACCEPT` 0.3-0.5 mm above nozzle contact: when the coil
@@ -1265,7 +1268,7 @@ the calibrations is wrong.
 
 The committed `v24-350` profile already enables the hybrid
 (`features=...,eddy_f`, the override lives in its `machine-extras.cfg`); until
-it is calibrated on the bench `position_endstop: 0.400` is a placeholder. The
+it is calibrated on the bench `position_endstop: -0.520` is the profile default. The
 requirements match plain `eddy_f`: a current Klipper with
 `descend_z`, and the EDDY-F harness connected only with the board powered off.
 
@@ -1282,7 +1285,10 @@ references against the original option text:
   `Registering duplicate object 'probe'`. The check also catches a `[probe]`
   returning to a board file, which the config parser merges silently.
 - **ERROR** — `[stepper_z]` has a physical `endstop_pin` (not `probe:...`) but
-  no `position_endstop`: Klipper requires it for a hardware Z endstop.
+  no `position_endstop`: Klipper requires it for a hardware Z endstop. The
+  opposite mistake is caught too: `position_endstop` next to
+  `probe:z_virtual_endstop`, which Klipper never reads and rejects with
+  `Option 'position_endstop' is not valid in section 'stepper_z'`.
 - **WARNING** — `[mcu NAME]` is declared but nothing references it, which
   signals an orphaned section from a board the machine does not have. The
   implicit `mcu` and `host` never produce this warning.

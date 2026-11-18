@@ -70,22 +70,27 @@ Every entry is provided in Russian and English.
   FLY-EDDY" section).
 
 - **RU:** Гибридный Z на стенде v24-350: `features=...,eddy_f`, `[stepper_z]`
-  в `machine-extras.cfg` паркуется концевиком M3-STOP (`endstop_pin: !SENS_2`,
-  `position_endstop: 0.400` — плейсхолдер до калибровки), а
+  паркуется концевиком M3-STOP (`endstop_pin: !SENS_2` в
+  `machine-extras.cfg`, `position_endstop: -0.520` — дефолт в seed
+  `printer.cfg` до калибровки), а
   `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` пробируют FLY-EDDY: Klipper
   выравнивает портал только через объект `probe`. `check_config.py` получил
-  две проверки: `[probe]` вместе с `probe_eddy_current*` — ERROR (Klipper
-  падает на дублирующей регистрации `probe`), и физический `endstop_pin` у
-  `[stepper_z]` без `position_endstop` — ERROR. README и `docs/PROFILES.md`
+  проверки: `[probe]` вместе с `probe_eddy_current*` — ERROR (Klipper падает
+  на дублирующей регистрации `probe`), физический `endstop_pin` у
+  `[stepper_z]` без `position_endstop` — ERROR, `position_endstop` рядом с
+  `probe:z_virtual_endstop` — ERROR (Klipper такую опцию не читает). README и `docs/PROFILES.md`
   описывают рецепт гибрида и две калибровки.
   **EN:** Hybrid Z on the v24-350 bench: `features=...,eddy_f`, `[stepper_z]`
-  in `machine-extras.cfg` parks on the M3-STOP switch (`endstop_pin: !SENS_2`,
-  `position_endstop: 0.400` as a placeholder until calibration), while
+  parks on the M3-STOP switch (`endstop_pin: !SENS_2` in
+  `machine-extras.cfg`, `position_endstop: -0.520` as the seed `printer.cfg`
+  default until calibration), while
   `QUAD_GANTRY_LEVEL` and `BED_MESH_CALIBRATE` probe with FLY-EDDY: Klipper
   levels the gantry only through the `probe` object. `check_config.py` gained
-  two checks: `[probe]` together with `probe_eddy_current*` is an ERROR
-  (Klipper aborts on the duplicate `probe` registration), and a physical
-  `[stepper_z] endstop_pin` without `position_endstop` is an ERROR. README and
+  checks: `[probe]` together with `probe_eddy_current*` is an ERROR (Klipper
+  aborts on the duplicate `probe` registration), a physical
+  `[stepper_z] endstop_pin` without `position_endstop` is an ERROR, and
+  `position_endstop` next to `probe:z_virtual_endstop` is an ERROR (Klipper
+  never reads that option there). README and
   `docs/PROFILES.md` document the hybrid recipe and the two calibrations.
 
 - **RU:** Расчёт TMC по фактическому току: `tmc_calc.py --run-current A`
@@ -130,7 +135,12 @@ Every entry is provided in Russian and English.
   комментируется, значение уходит в autosave). Включаемый файл для
   `SAVE_CONFIG` не годится — Klipper падает с `... conflicts with included
   value`. `check_config.py` считает `printer.cfg` слоем-оверрайдом, поэтому
-  повторное открытие `[stepper_z]` больше не даёт лишнего WARNING.
+  повторное открытие `[stepper_z]` больше не даёт лишнего WARNING. Дефолт
+  seed-файла для этого профиля — `position_endstop: -0.520`; в генератор
+  `new_machine.sh` добавлен закомментированный блок-подсказка с тем же
+  значением. Новая ERROR в `check_config.py`: `position_endstop` рядом с
+  `probe:z_virtual_endstop` (Klipper такую опцию не читает и падает с
+  `Option 'position_endstop' is not valid`).
   **EN:** For the `v24-350` hybrid Z the `[stepper_z] position_endstop` value
   moved from `machine-extras.cfg` into the seed `printer.cfg`: it is a
   per-machine setting, and `Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG` now persists it
@@ -138,7 +148,11 @@ Every entry is provided in Russian and English.
   value lands in the autosave). An included file cannot be used for that —
   Klipper fails with `... conflicts with included value`. `check_config.py`
   treats `printer.cfg` as an override layer, so reopening `[stepper_z]` no
-  longer raises a spurious WARNING.
+  longer raises a spurious WARNING. The seed default for this profile is
+  `position_endstop: -0.520`, and `new_machine.sh` now emits a commented
+  hint block with the same value. New ERROR in `check_config.py`:
+  `position_endstop` next to `probe:z_virtual_endstop` (Klipper never reads
+  that option and aborts with `Option 'position_endstop' is not valid`).
 
 - **RU:** На v24 от 250 мм Z переведён на `17HS19-2004S1` (2.0 A peak →
   1.4142 A RMS, `HSTRT/HEND = 0/0`, `TBL=0`): добавлен модуль

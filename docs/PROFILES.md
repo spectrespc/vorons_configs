@@ -111,9 +111,9 @@ Z-модули: пара Z задаётся только ключами проф
   [stepper_z]
   endstop_pin: !SENS_2
 
-  # printer.cfg — плейсхолдер, калибруется Z_ENDSTOP_CALIBRATE + SAVE_CONFIG
+  # printer.cfg — дефолт профиля, калибруется Z_ENDSTOP_CALIBRATE + SAVE_CONFIG
   [stepper_z]
-  position_endstop: 0.400
+  position_endstop: -0.520
   ```
 
   `position_endstop` обязателен: Klipper принимает его отсутствие только при
