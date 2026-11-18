@@ -13,6 +13,8 @@ Usage:
   tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24
   tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 --r-ohm 1.5 --vm 24 \\
               --section stepper_z --section stepper_z1
+  tmc_calc.py --driver tmc2209 --motor MOONS-CSE14HRA1L410A-01 --vm 24 \\
+              --run-current 0.55 --tbl 0 --toff 3
   tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC --vm 48 --json
   tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 --mode stealthchop
   tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 --sgt -10 --json
@@ -450,11 +452,61 @@ def selftest_update() -> int:
         "# trailing note\n"
     )
     third, _ = update_module_text(spreadcycle, args, motors)
-    check("spreadcycle adds chopper keys", "driver_TBL: 2" in third)
+    check("spreadcycle adds chopper keys", "driver_TBL: 0" in third)
     check("option order kept",
           third.index("uart_pin: ") < third.index("run_current: ")
           < third.index("driver_TBL: "))
     check("tail comment kept", "# trailing note" in third)
+
+    requested_args = build_parser().parse_args(
+        ["--driver", "tmc2209", "--vm", "24",
+         "--motor", "MOONS-CSE14HRA1L410A-01", "--mode", "spreadcycle",
+         "--run-current", "0.55", "--tbl", "0", "--toff", "3"]
+    )
+    requested = calculate(requested_args, motors)
+    check("--run-current sets run_current", requested["run_current"] == 0.55,
+          str(requested["run_current"]))
+    check("--run-current derives i_factor",
+          abs(float(requested["i_factor_effective"]) - 0.55) < 1e-9,
+          str(requested["i_factor_effective"]))
+
+    zero_args = build_parser().parse_args(
+        ["--driver", "tmc2209", "--vm", "24", "--i-rated", "0",
+         "--l-mh", "2.8", "--r-ohm", "1.5", "--run-current", "0.55"]
+    )
+    try:
+        calculate(zero_args, motors)
+        check("zero rated current refused", False, "no exception")
+    except CalcError as exc:
+        check("zero rated current refused", "positive" in str(exc), str(exc))
+
+    held = (
+        "[tmc2209 extruder]\n"
+        "uart_pin: extruder:EXT_UART\n"
+        "run_current: 0.55\n"
+        "driver_TBL: 0\n"
+        "driver_TOFF: 3\n"
+    )
+    held_args = build_parser().parse_args(
+        ["--vm", "24", "--motor", "MOONS-CSE14HRA1L410A-01",
+         "--run-current", "0.55", "--update-module", "fixture.cfg",
+         "--sections", "extruder"]
+    )
+    sixth, held_report = update_module_text(held, held_args, motors)
+    check("module TBL kept without --tbl", "driver_TBL: 0" in sixth)
+    check("module TBL reported as module source",
+          held_report["sections"][0]["tbl_source"] == "module",
+          str(held_report["sections"][0]["tbl_source"]))
+    explicit_args = build_parser().parse_args(
+        ["--vm", "24", "--motor", "MOONS-CSE14HRA1L410A-01",
+         "--run-current", "0.55", "--tbl", "1", "--toff", "3",
+         "--update-module", "fixture.cfg", "--sections", "extruder"]
+    )
+    seventh, explicit_report = update_module_text(held, explicit_args, motors)
+    check("explicit --tbl wins over the module",
+          "driver_TBL: 1" in seventh
+          and explicit_report["sections"][0]["tbl_source"] == "cli",
+          str(explicit_report["sections"][0]["tbl_source"]))
 
     selective = build_parser().parse_args(
         ["--vm", "24", "--motor", "17HS4401S", "--i-factor", "1.0",
@@ -572,6 +624,52 @@ def motor_module_name(motor: str) -> str:
 # --- Calculation ---------------------------------------------------------
 
 
+def resolve_request_current(
+    driver: str, i_rated: float, i_factor: float, run_current: float | None
+) -> tuple[float, float]:
+    """Requested run current and the effective share of the rated current.
+
+    ``--run-current`` is the authoritative input when given: the factor is
+    derived from it (and printed in the report), so a 0.55 A request on a 1.0 A
+    motor reads as i_factor_effective=0.55 instead of the CLI default.
+
+    >>> resolve_request_current("tmc2209", 1.0, 0.8, 0.55)
+    (0.55, 0.55)
+    >>> resolve_request_current("tmc2209", 1.7, 0.8, None)
+    (1.36, 0.8)
+    >>> try:
+    ...     resolve_request_current("tmc2209", 1.7, 1.0, 3.0)
+    ... except CalcError as exc:
+    ...     print(str(exc))
+    run_current 3.000 A is above the Klipper limit 2.0 A
+    """
+    if run_current is not None:
+        if not (0 < run_current <= KLIPPER_MAX_CURRENT[driver]):
+            raise CalcError(
+                "run_current %.3f A is above the Klipper limit %.1f A"
+                % (run_current, KLIPPER_MAX_CURRENT[driver])
+            )
+        return run_current, round(run_current / i_rated, 6)
+    if not (0 < i_factor <= 1.0):
+        raise CalcError("--i-factor must be in (0, 1]")
+    return i_rated * i_factor, i_factor
+
+
+def resolve_table_input(
+    value: int | None, source: str | None, default: int
+) -> tuple[int, str]:
+    """Resolve one TBL/TOFF input and where it came from.
+
+    >>> resolve_table_input(None, None, 2)
+    (2, 'cli')
+    >>> resolve_table_input(0, "profile", 2)
+    (0, 'profile')
+    """
+    if value is None:
+        return default, "cli"
+    return value, source or "cli"
+
+
 def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) -> dict[str, object]:
     driver = args.driver
     warnings: list[str] = []
@@ -602,8 +700,8 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
         raise CalcError(
             "specify --motor NAME or all of --i-rated/--l-mh/--r-ohm"
         )
-    if not (0 < args.i_factor <= 1.0):
-        raise CalcError("--i-factor must be in (0, 1]")
+    if i_rated <= 0 or inductance_mh <= 0 or resistance_ohm <= 0:
+        raise CalcError("--i-rated, --l-mh and --r-ohm must be positive")
 
     rsense = args.rsense if args.rsense is not None else DEFAULT_RSENSE[driver]
     low, high = VM_RANGE[driver]
@@ -625,13 +723,22 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
             "Rsense=%.3f Ohm: use a smaller --rsense or a stronger driver"
             % (i_rated, DRIVER_LABELS[driver], ic_limit, rsense)
         )
-    requested = i_rated * args.i_factor
+    requested, i_factor_effective = resolve_request_current(
+        driver, i_rated, args.i_factor, args.run_current
+    )
+    if args.run_current is not None and requested > ic_limit + 1e-9:
+        raise CalcError(
+            "run_current %.3f A is above the %s limit of %.3f A RMS at "
+            "Rsense=%.3f Ohm"
+            % (requested, DRIVER_LABELS[driver], ic_limit, rsense)
+        )
     run_current = round(min(requested, ic_limit), 4)
     if requested > ic_limit + 1e-9:
         warnings.append(
             "rated current %.2f A x %.2f = %.2f A exceeds the %s limit for "
             "Rsense=%.3f Ohm (%.2f A RMS): run_current clamped"
-            % (i_rated, args.i_factor, requested, DRIVER_LABELS[driver], rsense, ic_limit)
+            % (i_rated, i_factor_effective, requested, DRIVER_LABELS[driver],
+               rsense, ic_limit)
         )
     if run_current > KLIPPER_MAX_CURRENT[driver]:
         raise CalcError(
@@ -639,20 +746,23 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
             % (run_current, KLIPPER_MAX_CURRENT[driver])
         )
 
+    tbl, tbl_source = resolve_table_input(args.tbl, args.tbl_source, 0)
+    toff, toff_source = resolve_table_input(args.toff, args.toff_source, 3)
+
     if driver == "tmc2209":
-        if args.tbl not in TBL_CHOICES["tmc2209"]:
+        if tbl not in TBL_CHOICES["tmc2209"]:
             raise CalcError("TMC2209 supports --tbl 0..3")
         regs = current_2209(run_current, rsense)
         cs_for_chopper = int(regs["cs"])
     else:
-        if args.tbl not in TBL_CHOICES["tmc5160"]:
+        if tbl not in TBL_CHOICES["tmc5160"]:
             raise CalcError("TMC5160 supports --tbl 0..3")
         regs = current_5160(run_current, rsense)
         cs_for_chopper = int(regs["irun"])
 
-    if args.toff < 1 or args.toff > 15:
+    if toff < 1 or toff > 15:
         raise CalcError("--toff must be 1..15")
-    if args.toff < 3:
+    if toff < 3:
         warnings.append("TOFF < 3 is below the vendor recommendation (3..8)")
 
     nominal_v, vm_lo, vm_hi = motor_voltage_window(resistance_ohm, regs["i_peak_actual"])
@@ -674,7 +784,7 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
     if args.mode == "spreadcycle":
         chopper_values = chopper(
             driver, args.vm, inductance_mh / 1000.0, resistance_ohm,
-            regs["i_peak_actual"], cs_for_chopper, args.tbl, args.toff,
+            regs["i_peak_actual"], cs_for_chopper, tbl, toff,
         )
         if chopper_values["hystart_min"] > 20.0:
             warnings.append(
@@ -752,7 +862,8 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
         "step_angle": step_angle,
         "inductance_mh": inductance_mh,
         "resistance_ohm": resistance_ohm,
-        "i_factor": args.i_factor,
+        "i_factor": i_factor_effective,
+        "i_factor_effective": i_factor_effective,
         "run_current": run_current,
         "hold_current": hold_current,
         "stealthchop_threshold": threshold,
@@ -762,8 +873,10 @@ def calculate(args: argparse.Namespace, motors: dict[str, dict[str, object]]) ->
         "motor_nominal_v": nominal_v,
         "vm_window": (vm_lo, vm_hi),
         "sense_suggestion": sense_resistor_for(driver, cs_for_chopper, regs["i_peak_actual"]),
-        "tbl": args.tbl,
-        "toff": args.toff,
+        "tbl": tbl,
+        "toff": toff,
+        "tbl_source": tbl_source,
+        "toff_source": toff_source,
         "section_names": list(args.section),
         "warnings": warnings,
         "notes": notes,
@@ -898,9 +1011,12 @@ def render_text(result: dict[str, object], sections: list[dict[str, object]]) ->
                    % (int(regs["globalscaler"]), int(regs["irun"]), regs["i_rms_actual"]))
     chopper_values = result["chopper"]
     if chopper_values:
-        out.append("# chopper: TBL=%s TOFF=%s HSTRT=%d HEND=%d, fCHOP(limit)=%.1f kHz"
-                   % (result["tbl"], result["toff"], chopper_values["hstrt"],
-                      chopper_values["hend"], chopper_values["fchop_limit_khz"]))
+        out.append("# chopper: TBL=%s (%s) TOFF=%s (%s) HSTRT=%d HEND=%d, "
+                   "fCHOP(limit)=%.1f kHz"
+                   % (result["tbl"], result["tbl_source"],
+                      result["toff"], result["toff_source"],
+                      chopper_values["hstrt"], chopper_values["hend"],
+                      chopper_values["fchop_limit_khz"]))
     for section in sections:
         out.append("")
         out.append("[%s %s]" % (driver, section["name"]))
@@ -990,6 +1106,20 @@ def rewrite_option(line: str, value: str) -> str:
     space = rest[: len(rest) - len(rest.lstrip())] or " "
     tail = ("  # " + comment.strip()) if sep else ""
     return "%s%s:%s%s%s" % (indent, key, space, value, tail)
+
+
+def same_number(left: str, right: str) -> bool:
+    """True when two option values are the same number (keeps the spelling).
+
+    >>> same_number("0.600", "0.6"), same_number("0.600", "1.7")
+    (True, False)
+    >>> same_number("0.110", "0.110"), same_number("x", "0")
+    (True, False)
+    """
+    try:
+        return abs(float(left) - float(right)) <= 1e-9
+    except ValueError:
+        return left == right
 
 
 def section_blocks(lines: list[str]) -> list[dict[str, object]]:
@@ -1150,6 +1280,20 @@ def update_module_text(
         mode = args.mode or section_mode(active.get("stealthchop_threshold"))
         section_args = _section_args(args, driver, str(block["name"]),
                                      args.rsense or section_rsense, mode)
+        # Without an explicit CLI value the module keeps its own TBL/TOFF: the
+        # chopper inputs are a machine property, not a CLI default.
+        if section_args.tbl is None and "driver_tbl" in active:
+            try:
+                section_args.tbl = int(active["driver_tbl"])
+                section_args.tbl_source = "module"
+            except ValueError:
+                pass
+        if section_args.toff is None and "driver_toff" in active:
+            try:
+                section_args.toff = int(active["driver_toff"])
+                section_args.toff_source = "module"
+            except ValueError:
+                pass
         result = calculate(section_args, motors)
         values = _target_values(result)
         for warning in result["warnings"]:
@@ -1200,7 +1344,12 @@ def update_module_text(
         for line in body:
             parsed = split_option(line)
             if parsed and parsed[0] in values:
-                new_body.append(rewrite_option(line, values[parsed[0]]))
+                if same_number(parsed[1], values[parsed[0]]):
+                    # ``0.600`` and ``0.6`` are the same current: rewriting it
+                    # would only add diff noise to unrelated modules.
+                    new_body.append(line)
+                else:
+                    new_body.append(rewrite_option(line, values[parsed[0]]))
                 seen.add(parsed[0])
             else:
                 new_body.append(line)
@@ -1227,6 +1376,11 @@ def update_module_text(
                 "sense_resistor": result["sense_resistor"],
                 "mode": mode,
                 "run_current": result["run_current"],
+                "i_factor": result["i_factor_effective"],
+                "tbl": result["tbl"],
+                "toff": result["toff"],
+                "tbl_source": result["tbl_source"],
+                "toff_source": result["toff_source"],
                 "registers": result["registers"],
             }
         )
@@ -1253,7 +1407,7 @@ def update_module_text(
     header.append(
         "# %s @ %s V, Rsense=%s Ohm, i_factor=%s"
         % (first["motor"] or "CLI parameters", _fmt(first["vm"]),
-           _fmt(first["sense_resistor"]), _fmt(args.i_factor))
+           _fmt(first["sense_resistor"]), _fmt(first["i_factor"]))
     )
     if args.motor:
         header.append("# Мотор: %s" % motors[args.motor]["source"])
@@ -1272,6 +1426,10 @@ def update_module_text(
         )
     header.append(UPDATE_END)
     new_text = "\n".join(header + cleaned) + "\n"
+    if "\r\n" in text:
+        # Keep a CRLF module byte-identical outside the managed changes: the
+        # updater must not turn one board file into a whole-file diff.
+        new_text = new_text.replace("\n", "\r\n")
     report["sections"] = rows
     report["changed"] = new_text != text
     return new_text, report
@@ -1461,7 +1619,7 @@ def run_update_module(args: argparse.Namespace) -> int:
     if args.sections:
         args.sections = [item.strip() for item in args.sections.split(",") if item.strip()]
     try:
-        with open(args.update_module, "r", encoding="utf-8") as fh:
+        with open(args.update_module, "r", encoding="utf-8", newline="") as fh:
             text = fh.read()
     except OSError as exc:
         print("ERROR: cannot read %s: %s" % (args.update_module, exc), file=sys.stderr)
@@ -1494,8 +1652,9 @@ def run_update_module(args: argparse.Namespace) -> int:
                 % (int(regs["globalscaler"]), int(regs["irun"]))
             )
             print(
-                "  %s: run_current=%s A RMS (%s, %s)"
-                % (row["section"], _fmt(row["run_current"]), detail, row["mode"])
+                "  %s: run_current=%s A RMS (%s, %s), TBL=%s (%s) TOFF=%s (%s)"
+                % (row["section"], _fmt(row["run_current"]), detail, row["mode"],
+                   row["tbl"], row["tbl_source"], row["toff"], row["toff_source"])
             )
         for note in report["notes"]:
             print("  примечание: %s" % note)
@@ -1544,7 +1703,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vm", type=float, help="напряжение питания драйвера, В")
     parser.add_argument("--rsense", type=float, help="шунт, Ом (по умолчанию 2209: 0.110, 5160: 0.075)")
     parser.add_argument("--i-factor", type=float, default=0.8,
-                        help="доля номинального тока (по умолчанию 0.8)")
+                        help="доля номинального тока (по умолчанию 0.8); "
+                             "игнорируется при --run-current")
+    parser.add_argument("--run-current", type=float, metavar="A",
+                        help="явный run_current, A RMS; i_factor выводится из него")
     parser.add_argument("--mode", choices=("spreadcycle", "stealthchop"),
                         help="режим чоппера (по умолчанию spreadcycle; "
                              "--update-module без флага сохраняет режим каждой секции)")
@@ -1552,8 +1714,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="hold_current = run_current x доля; 0 — не печатать")
     parser.add_argument("--stealthchop-threshold", type=float,
                         help="порог stealthchop в мм/с (по умолчанию 999999 для stealthchop, иначе 0)")
-    parser.add_argument("--tbl", type=int, default=2, help="TBL 0..3 (по умолчанию 2)")
-    parser.add_argument("--toff", type=int, default=3, help="TOFF 1..15 (по умолчанию 3)")
+    parser.add_argument("--tbl", type=int, default=None,
+                        help="TBL 0..3 (по умолчанию 0 — правило парка; "
+                             "--update-module берёт значение секции)")
+    parser.add_argument("--toff", type=int, default=None,
+                        help="TOFF 1..15 (по умолчанию 3; --update-module берёт "
+                             "значение секции)")
+    parser.add_argument("--tbl-source", choices=("cli", "module", "profile"),
+                        default="cli", help=argparse.SUPPRESS)
+    parser.add_argument("--toff-source", choices=("cli", "module", "profile"),
+                        default="cli", help=argparse.SUPPRESS)
     parser.add_argument("--iholddelay", type=int, help="driver_IHOLDDELAY, печатается если отличается от Klipper")
     parser.add_argument("--tpowerdown", type=int, help="driver_TPOWERDOWN, печатается если отличается от Klipper")
     parser.add_argument("--pwm-ofs", type=int, help="PWM_OFS из PWM_AUTO (только stealthchop)")

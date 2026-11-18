@@ -30,6 +30,9 @@
 | `head` | модуль из `std.configs/extruder/heads/` | экструдер/хотэнд |
 | `vm_xy` | `48` (по умолчанию), `55` | питание драйверов X/Y; 55 В допустимы только на `manta-m8p` (V2.0, HV-вход 24–60 В) |
 | `vm_ze` | `24` | питание Z и обоих экструдеров; другие значения отклоняются |
+| `xy_tbl`, `xy_toff` | TBL `0..3`, TOFF `1..15` (дефолт `0`/`3`) | входы чоппера X/Y |
+| `z_tbl`, `z_toff` | TBL `0..3`, TOFF `1..15` (дефолт `0`/`3`) | входы чоппера Z |
+| `e_tbl`, `e_toff` | TBL `0..3`, TOFF `1..15` (дефолт `0`/`3`) | входы чоппера обоих экструдеров |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy`, `eddy_f` | подключаемые подсистемы |
 | `frame_w`, `frame_d` | мм | внешняя рама, для проверки якорей |
 | `z_base_measured`, `z_leg_measured` | мм | измеренные стороны треугольника стола (trident) |
@@ -297,6 +300,13 @@ override — в его `machine-extras.cfg`); до калибровки на с�
 - **WARNING** — `[mcu NAME]` объявлен, но на него нет ни одной ссылки: признак
   осиротевшей секции от платы, которой на машине нет. Неявный `mcu` и `host`
   предупреждение не вызывают.
+- **ERROR** — активный `stealthchop_threshold >= 1000` у любой `[tmc*]`-секции:
+  Klipper включает StealthChop, и регистры чоппера не работают. Сообщение
+  содержит готовую команду `tmc_calc.py --update-module … --mode spreadcycle`.
+- **WARNING** — у `[tmc*]`-секции ключа `stealthchop_threshold` нет: Klipper
+  работает в SpreadCycle по умолчанию, но парковый инвариант требует явный `0`.
+  Аудит обходит весь `std.configs/**` и `printers/*/local/**`, поэтому
+  недосягаемый из `machine.conf` `boards/fly-sb2040.cfg` тоже проверяется.
 
 ### Раскладка репозитория
 
@@ -427,8 +437,8 @@ Klipper и настройка CAN-хоста»).
 | `scripts/update_firmware.sh [-p профиль] [--dry-run] [--auto]` | пересборка и прошивка всех MCU после обновления Klipper |
 | `scripts/install_update_hook.sh [--profile профиль] [--dry-run]` | установка systemd path/timer хука (нужен sudo) |
 | `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | расчёт параметров TMC по даташиту мотора: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
-| `scripts/tmc_tune.py --profile printers/<id> --run` | подбор `max_velocity`/`max_accel` через `TEST_SPEED`: `--dry-plan`, `--apply`, `--heat`, `--selftest` |
-| `scripts/bringup.sh -p <профиль>` | первичная настройка: `deploy → tmc → motion → pid-e → pid-b → done`, resume через `--from`, проверка плана `--dry-run` |
+| `scripts/tmc_tune.py --profile printers/<id> --run` | подбор `max_velocity`/`max_accel` через `TEST_SPEED`; `--z-test` — подбор `max_z_velocity`/`max_z_accel` через `TEST_SPEED_Z`: `--dry-plan`, `--apply`, `--heat`, `--z-offline-result`, `--selftest` |
+| `scripts/bringup.sh -p <профиль>` | первичная настройка: `deploy → tmc → motion → z-motion → pid-e → pid-b → done`, resume через `--from`, проверка плана `--dry-run` |
 | `scripts/lib/bringup_api.py` | клиент Moonraker (stdlib): `info`, `status`, `query`, `gcode`, `store`, `restart`, `wait-ready`, `wait-marker`, `verify-hold` |
 
 ### Расчёт TMC: `docs/tmc/` и `scripts/tmc_calc.py`
@@ -505,13 +515,34 @@ python3 scripts/tmc_calc.py --update-module \
   `mechanics/trident.cfg`), правится только содержимое;
 - `--selftest` сверяет формулы с сохранёнными xlsx (±1 LSB) и прогоняет doctest.
 
-`--i-factor 0.8` — стартовая точка; боевые `run_current` парка ниже (0.951 /
-0.800 / 0.600 A), это результат тепловых испытаний — сверка в
-`docs/tmc/CALCS.md`.
+#### Входы чоппера и парковый SpreadCycle
+
+- `TBL`/`TOFF` — входы расчёта (§3 `CALCS.md`), а не его результат. Они вынесены
+  в `machine.conf` парами по группам осей: `xy_tbl/xy_toff`, `z_tbl/z_toff`,
+  `e_tbl/e_toff` (дефолт `0`/`3`; TBL=0 на всех моторах парка).
+  Диапазоны проверяет `render_profile.py` (TBL `0..3`, TOFF `1..15`), источник
+  значения печатается в отчёте `tmc_calc.py` (`cli|module|profile`).
+- Все драйверы парка работают в SpreadCycle с явным `stealthchop_threshold: 0`.
+  Для X/Y и экструдеров так было и раньше (в Klipper отсутствие ключа = SpreadCycle),
+  теперь это закреплено инвариантом: `check_config.py` даёт ERROR на активный
+  порог ≥ 1000 и WARNING на отсутствующий ключ, аудит идёт по всему
+  `std.configs/**` и `printers/*/local/**`, включая недосягаемый из
+  `machine.conf` `boards/fly-sb2040.cfg`; `bringup_tmc.py` отказывает на
+  stealthchop-секции вместо тихого выбрасывания регистров.
+- Z пересчитан на номинал 1.7 A (`17HS4401S`) при `TBL=0`: `driver_HSTRT: 0`,
+  `driver_HEND: 2`. Экструдеры остаются на фактических 0.55 A и 0.60 A: расчёт
+  идёт под эти токи (`--run-current`), а не под номинал 1.0 A мотора.
+
+`--run-current A` задаёт `run_current` напрямую; `i_factor` выводится из него и
+печатается как `i_factor_effective`. `--i-factor 0.8` остаётся стартовой точкой
+ручных прогонов; в парке X/Y пересчитываются на номинал (`--i-factor 1.0`, как
+требует bringup), Z — на 1.7 A, экструдеры — на 0.55/0.60 A. Исторические
+0.951/0.800/0.600 A — результат тепловых испытаний, в `docs/tmc/CALCS.md` §8 они
+помечены как устаревшие.
 
 ### Первичная настройка машины: `scripts/bringup.sh`
 
-Один прогон на новую машину: **deploy → tmc → motion → pid-e → pid-b → done**.
+Один прогон на новую машину: **deploy → tmc → motion → z-motion → pid-e → pid-b → done**.
 Скрипт оркестрирует существующие инструменты и не дублирует их логику.
 
 ```bash
@@ -527,6 +558,7 @@ cd ~/vorons_configs
 | `deploy` | `deploy_configs.sh -p <id> -b`, затем `POST /machine/restart` и ожидание `ready` (60 с) |
 | `tmc` | `check_config.py --merged` даёт живой список `[tmc*]`; для каждой секции берутся мотор (`xy_motor` / `z_motor` / `e_motor`) и рейл (`vm_xy` для X/Y, `vm_ze` для Z/E), `tmc_calc.py --update-module` переписывает ток и чоппер, затем deploy + restart |
 | `motion` | `tmc_tune.py --run --apply --iterations 2`: лестница `TEST_SPEED`, вердикт по `GET_POSITION`, бисекция, запись пары в `machine-extras.cfg`; требует подтверждения оператора |
+| `z-motion` | `tmc_tune.py --run --apply --z-test --iterations 2`: лестница `max_z_velocity`/`max_z_accel`, на каждого кандидата запись `std.config.local/z_speed_test.cfg`, рестарт, повторное применение TMC, `G28`, выравнивание и `TEST_SPEED_Z`; перекос Z-моторов прерывает серию; требует подтверждения оператора |
 | `pid-e` | `PID_CALIBRATE HEATER=extruder TARGET=250`, разбор `pid_Kp/Ki/Kd` из `gcode_store`, патч `printers/<id>/local/pid.cfg`, deploy + restart, проверка удержания 30 с (±1.5 °C) |
 | `pid-b` | то же для `heater_bed` при 120 °C |
 | `done` | сводка `git diff --stat` и предлагаемое сообщение коммита |
@@ -534,20 +566,26 @@ cd ~/vorons_configs
 Гейты S0 (без них прогон не стартует): чистый `git status` клона (нужен
 откат), валидный `machine.conf` и свежий `profile.cfg`, зелёный
 `deploy_configs.sh --check`, `std.config.local/uuids.cfg` без `REPLACE_WITH_`,
-`anchors.cfg` без `TODO` для этапа `motion`; Moonraker: Klipper `ready`,
-печать не идёт, нагреватели < 45 °C.
+`anchors.cfg` без `TODO` для этапов `motion`/`z-motion`; Moonraker: Klipper
+`ready`, печать не идёт, нагреватели < 45 °C.
 
 Особенности:
 
 - `SAVE_CONFIG` не используется: PID пишется в git, деплоится и применяется
   перезапуском Klipper;
-- Z вживую не тестируется (срыв = удар сопла), только пересчитывается на
-  номинал; 1.7 A при пределе TMC2209/0.110 = 1.741 A даёт CS=30/VSENSE=0 —
-  запаса почти нет, это ожидаемо и печатается в отчёте;
-- экструдер на номинале 1.0 A (MOONS, 1.41 мГн) при 24 В в SpreadCycle может
-  дать предупреждение `HystStart > 20`: чоппер работает на пределе
-  рекомендуемого гистерезиса. Это не ошибка расчёта; ручные варианты — `TBL=0`
-  (снижает HystStart примерно до 15) или уменьшение тока, решение за владельцем;
+- `z-motion` подбирает `max_z_velocity`/`max_z_accel` макросом `TEST_SPEED_Z`:
+  каждый кандидат — запись `std.config.local/z_speed_test.cfg`, рестарт Klipper,
+  повторное применение TMC (рестарт сбрасывает `SET_TMC_*`), `G28`,
+  выравнивание (`QUAD_GANTRY_LEVEL` или `Z_TILT_ADJUST`) и прогон. Коридор
+  держит сопло не ниже `--z-floor` (40 мм) и на 5 мм ниже верха оси; перекос
+  Z-моторов больше полного шага прерывает серию с требованием `G28` +
+  выравнивания. После теста обязательны `G28` и выравнивание: `position_endstop`
+  стенда — плейсхолдер, поэтому `z_offset` до ручной калибровки недействителен;
+- экструдеры остаются на фактических 0.55 A (`extruder`) и 0.60 A
+  (`ext-extruder`) при `e_tbl=0`; расчётные `HSTRT/HEND` (7/4 и 7/5) дают более
+  гранулярную регулировку тока, чем апстримные 7/6. Предупреждение `HystStart >
+  20` для номинала 1.0 A больше не ожидается: ток не повышается, а `TBL=0`
+  держит гистерезис в норме;
 - состояние (`~/printer_data/.bringup/<id>.json`) хранит последний этап, HEAD
   и журнал прогонов; после обрыва продолжайте `--from`;
 - после частичного прогона клон изменён: закоммитьте результат (или
@@ -569,6 +607,7 @@ python3 scripts/lib/bringup_state.py selftest
 python3 scripts/lib/bringup_pid.py selftest
 python3 scripts/lib/bringup_tmc.py selftest
 python3 scripts/tmc_tune.py --selftest
+python3 scripts/tmc_tune.py --profile printers/v24-350 --z-test --dry-plan
 python3 scripts/tmc_calc.py --selftest
 ```
 
@@ -843,6 +882,9 @@ guide live in [`docs/PROFILES.md`](docs/PROFILES.md) (Russian).
 | `head` | module under `std.configs/extruder/heads/` | extruder/hotend |
 | `vm_xy` | `48` (default), `55` | X/Y driver rail; 55 V is legal only on `manta-m8p` (V2.0, HV input 24-60 V) |
 | `vm_ze` | `24` | Z and both extruders; any other value is rejected |
+| `xy_tbl`, `xy_toff` | TBL `0..3`, TOFF `1..15` (default `0`/`3`) | X/Y chopper inputs |
+| `z_tbl`, `z_toff` | TBL `0..3`, TOFF `1..15` (default `0`/`3`) | Z chopper inputs |
+| `e_tbl`, `e_toff` | TBL `0..3`, TOFF `1..15` (default `0`/`3`) | chopper inputs of both extruders |
 | `features` | `fans`, `display`, `buttons`, `belay`, `btt_sfs`, `runout`, `extra_extruder`, `host`, `y_frame`, `eddy`, `eddy_f` | optional subsystems |
 | `frame_w`, `frame_d` | mm | outer frame, used for anchor sanity checks |
 | `z_base_measured`, `z_leg_measured` | mm | measured bed triangle sides (trident) |
@@ -1111,6 +1153,14 @@ references against the original option text:
 - **WARNING** — `[mcu NAME]` is declared but nothing references it, which
   signals an orphaned section from a board the machine does not have. The
   implicit `mcu` and `host` never produce this warning.
+- **ERROR** — an active `stealthchop_threshold >= 1000` in any `[tmc*]`
+  section: Klipper switches to StealthChop and the chopper registers do nothing.
+  The message contains a ready `tmc_calc.py --update-module … --mode spreadcycle`
+  command.
+- **WARNING** — a `[tmc*]` section has no `stealthchop_threshold`: Klipper uses
+  SpreadCycle by default, but the fleet invariant wants an explicit `0`. The
+  audit walks all of `std.configs/**` and `printers/*/local/**`, so
+  `boards/fly-sb2040.cfg` (unreachable from `machine.conf`) is covered too.
 
 ### Repository layout
 
@@ -1239,8 +1289,8 @@ first calibration, check the CAN host: `ip -details link show can0` must report
 | `scripts/update_firmware.sh [-p profile] [--dry-run] [--auto]` | rebuild and flash all MCUs after a Klipper update |
 | `scripts/install_update_hook.sh [--profile profile] [--dry-run]` | install the systemd path/timer hook (needs sudo) |
 | `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | TMC settings from a motor datasheet: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
-| `scripts/tmc_tune.py --profile printers/<id> --run` | finds `max_velocity`/`max_accel` with `TEST_SPEED`: `--dry-plan`, `--apply`, `--heat`, `--selftest` |
-| `scripts/bringup.sh -p <profile>` | first-run setup: `deploy → tmc → motion → pid-e → pid-b → done`, resume with `--from`, plan with `--dry-run` |
+| `scripts/tmc_tune.py --profile printers/<id> --run` | finds `max_velocity`/`max_accel` with `TEST_SPEED`; `--z-test` finds `max_z_velocity`/`max_z_accel` with `TEST_SPEED_Z`: `--dry-plan`, `--apply`, `--heat`, `--z-offline-result`, `--selftest` |
+| `scripts/bringup.sh -p <profile>` | first-run setup: `deploy → tmc → motion → z-motion → pid-e → pid-b → done`, resume with `--from`, plan with `--dry-run` |
 | `scripts/lib/bringup_api.py` | stdlib Moonraker client: `info`, `status`, `query`, `gcode`, `store`, `restart`, `wait-ready`, `wait-marker`, `verify-hold` |
 
 ### TMC settings: `docs/tmc/` and `scripts/tmc_calc.py`
@@ -1318,13 +1368,36 @@ Script rules:
 - `--selftest` compares the formulas with the saved xlsx (±1 LSB) and runs the
   doctest plus the offline `--update-module` cases.
 
-`--i-factor 0.8` is a starting point; the fleet's committed `run_current`
-values are lower (0.951 / 0.800 / 0.600 A) because of thermal testing — see the
-comparison in `docs/tmc/CALCS.md`.
+#### Chopper inputs and the SpreadCycle invariant
+
+- `TBL`/`TOFF` are inputs of the calculation (§3 of `CALCS.md`), not its result.
+  They live in `machine.conf` as one pair per axis group: `xy_tbl/xy_toff`,
+  `z_tbl/z_toff`, `e_tbl/e_toff` (default `0`/`3`; TBL=0 on every fleet
+  motor). `render_profile.py` checks the ranges (TBL `0..3`, TOFF
+  `1..15`), and `tmc_calc.py` reports the value source (`cli|module|profile`).
+- Every fleet driver runs SpreadCycle with an explicit
+  `stealthchop_threshold: 0`. X/Y and the extruders already did (in Klipper a
+  missing key means SpreadCycle); the invariant now enforces it:
+  `check_config.py` raises ERROR for an active threshold ≥ 1000 and WARNING for
+  a missing key, and the audit walks all of `std.configs/**` and
+  `printers/*/local/**`, including `boards/fly-sb2040.cfg`, which no
+  `machine.conf` can reach. `bringup_tmc.py` refuses a StealthChop section
+  instead of silently dropping the chopper registers.
+- Z is recalculated at the 1.7 A rating (`17HS4401S`) with `TBL=0`:
+  `driver_HSTRT: 0`, `driver_HEND: 2`. The extruders keep their actual 0.55 A
+  and 0.60 A: the calculation uses those currents (`--run-current`), not the
+  motor's 1.0 A rating.
+
+`--run-current A` sets `run_current` directly; `i_factor` is derived from it and
+printed as `i_factor_effective`. `--i-factor 0.8` remains a starting point for
+manual runs; in the fleet X/Y are recalculated at the rating (`--i-factor 1.0`,
+which bringup requires), Z at 1.7 A, and the extruders at 0.55/0.60 A. The
+historical 0.951/0.800/0.600 A values came from thermal testing and are marked
+as outdated in §8 of `docs/tmc/CALCS.md`.
 
 ### Machine commissioning: `scripts/bringup.sh`
 
-One run per new machine: **deploy → tmc → motion → pid-e → pid-b → done**.
+One run per new machine: **deploy → tmc → motion → z-motion → pid-e → pid-b → done**.
 The script orchestrates the existing tools and does not duplicate their logic.
 
 ```bash
@@ -1340,6 +1413,7 @@ cd ~/vorons_configs
 | `deploy` | `deploy_configs.sh -p <id> -b`, then `POST /machine/restart` and wait for `ready` (60 s) |
 | `tmc` | `check_config.py --merged` gives the live `[tmc*]` list; each section gets its motor (`xy_motor` / `z_motor` / `e_motor`) and rail (`vm_xy` for X/Y, `vm_ze` for Z/E), `tmc_calc.py --update-module` rewrites current and chopper, then deploy + restart |
 | `motion` | `tmc_tune.py --run --apply --iterations 2`: `TEST_SPEED` ladder, verdict from `GET_POSITION`, bisection, pair written to `machine-extras.cfg`; needs operator confirmation |
+| `z-motion` | `tmc_tune.py --run --apply --z-test --iterations 2`: `max_z_velocity`/`max_z_accel` ladder; per candidate it writes `std.config.local/z_speed_test.cfg`, restarts, re-applies the TMC settings, homes, levels the gantry and runs `TEST_SPEED_Z`; a Z skew aborts the series; needs operator confirmation |
 | `pid-e` | `PID_CALIBRATE HEATER=extruder TARGET=250`, parse `pid_Kp/Ki/Kd` from `gcode_store`, patch `printers/<id>/local/pid.cfg`, deploy + restart, verify 30 s of hold (±1.5 °C) |
 | `pid-b` | same for `heater_bed` at 120 °C |
 | `done` | `git diff --stat` summary and a suggested commit message |
@@ -1347,20 +1421,27 @@ cd ~/vorons_configs
 S0 gates (a run does not start without them): clean `git status` of the clone
 (the rollback target), valid `machine.conf` and a fresh `profile.cfg`, green
 `deploy_configs.sh --check`, `std.config.local/uuids.cfg` without
-`REPLACE_WITH_`, `anchors.cfg` without `TODO` for the `motion` stage; Moonraker:
+`REPLACE_WITH_`, `anchors.cfg` without `TODO` for the `motion`/`z-motion` stages; Moonraker:
 Klipper `ready`, no active print, heaters < 45 °C.
 
 Notes:
 
 - `SAVE_CONFIG` is not used: PID values are committed to git, deployed and
   applied by a Klipper restart;
-- Z is never tested live (a skip would ram the nozzle), it is only recomputed at
-  the nominal current; 1.7 A against the TMC2209/0.110 limit of 1.741 A gives
-  CS=30/VSENSE=0 with almost no headroom, which is expected and reported;
-- the extruder at its 1.0 A nominal (MOONS, 1.41 mH) on 24 V in SpreadCycle may
-  report `HystStart > 20`: the chopper runs at the edge of the recommended
-  hysteresis. It is not a calculation error; `TBL=0` (about 15) or a lower
-  current are the manual remedies, the owner decides;
+- `z-motion` finds `max_z_velocity`/`max_z_accel` with `TEST_SPEED_Z`: every
+  candidate writes `std.config.local/z_speed_test.cfg`, restarts Klipper,
+  re-applies the TMC settings (a restart drops `SET_TMC_*`), homes (`G28`),
+  levels the gantry (`QUAD_GANTRY_LEVEL` or `Z_TILT_ADJUST`) and runs the
+  macro. The corridor keeps the nozzle at or above `--z-floor` (40 mm) and
+  5 mm below the top of the axis; a spread between the Z motors larger than one
+  full step aborts the series and requires `G28` + leveling. After the test,
+  `G28` and leveling are mandatory: the bench `position_endstop` is a
+  placeholder, so `z_offset` stays invalid until it is calibrated by hand;
+- the extruders stay at their actual 0.55 A (`extruder`) and 0.60 A
+  (`ext-extruder`) with `e_tbl=0`; the calculated `HSTRT/HEND` (7/4 and 7/5)
+  give finer current regulation than the upstream 7/6. The `HystStart > 20`
+  warning is no longer expected at a 1.0 A rating: the current is not raised and
+  `TBL=0` keeps the hysteresis in range;
 - the state file (`~/printer_data/.bringup/<id>.json`) keeps the last stage,
   the repository HEAD and a run log; resume with `--from`;
 - a partial run leaves the clone modified: commit the result (or
@@ -1381,6 +1462,7 @@ python3 scripts/lib/bringup_state.py selftest
 python3 scripts/lib/bringup_pid.py selftest
 python3 scripts/lib/bringup_tmc.py selftest
 python3 scripts/tmc_tune.py --selftest
+python3 scripts/tmc_tune.py --profile printers/v24-350 --z-test --dry-plan
 python3 scripts/tmc_calc.py --selftest
 ```
 

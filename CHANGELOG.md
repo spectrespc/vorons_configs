@@ -88,7 +88,62 @@ Every entry is provided in Russian and English.
   `[stepper_z] endstop_pin` without `position_endstop` is an ERROR. README and
   `docs/PROFILES.md` document the hybrid recipe and the two calibrations.
 
+- **RU:** Расчёт TMC по фактическому току: `tmc_calc.py --run-current A`
+  задаёт `run_current` напрямую, `i_factor` выводится из него
+  (`i_factor_effective`), а `--json` и отчёт печатают источник входов
+  `tbl_source`/`toff_source` (`cli|module|profile`). `--update-module` без явного
+  `--tbl/--toff` сохраняет значение секции. В `machine.conf` добавлены пары
+  входов чоппера `xy_tbl/xy_toff`, `z_tbl/z_toff`, `e_tbl/e_toff`
+  (`render_profile.py` проверяет TBL 0..3 и TOFF 1..15), шаблон и оба профиля
+  обновлены. Новый макрос `std.macros/test_speed_z.cfg` (`TEST_SPEED_Z`) и
+  контур `tmc_tune.py --z-test` (лестница `max_z_velocity`/`max_z_accel`,
+  `--z-travel/--z-floor/--z-max-velocity/--z-max-accel/--z-max-runs/
+  --z-offline-result`) подбирают лимиты Z по отдельным счётчикам каждого
+  Z-мотора с детектом перекоса; `bringup.sh` получил этап `z-motion`.
+  `check_config.py` закрепил инвариант SpreadCycle (ERROR при активном
+  `stealthchop_threshold >= 1000`, WARNING при отсутствии ключа) для всего
+  `std.configs/**` и `printers/*/local/**`, а `bringup_tmc.py` отказывает
+  stealthchop-секции вместо тихого выбрасывания регистров.
+  **EN:** TMC calculation at the actual current: `tmc_calc.py --run-current A`
+  sets `run_current` directly, `i_factor` is derived (`i_factor_effective`), and
+  `--json` plus the report print the input source `tbl_source`/`toff_source`
+  (`cli|module|profile`). `--update-module` keeps the section value when
+  `--tbl/--toff` is not given. `machine.conf` gained the chopper input pairs
+  `xy_tbl/xy_toff`, `z_tbl/z_toff`, `e_tbl/e_toff` (`render_profile.py` checks
+  TBL 0..3 and TOFF 1..15); the template and both profiles are updated. New
+  `std.macros/test_speed_z.cfg` (`TEST_SPEED_Z`) and the `tmc_tune.py --z-test`
+  loop (ladder over `max_z_velocity`/`max_z_accel`,
+  `--z-travel/--z-floor/--z-max-velocity/--z-max-accel/--z-max-runs/
+  --z-offline-result`) tune the Z limits from each Z motor's own step counter
+  and detect skew; `bringup.sh` gained the `z-motion` stage. `check_config.py`
+  enforces the SpreadCycle invariant (ERROR for an active
+  `stealthchop_threshold >= 1000`, WARNING for a missing key) across all of
+  `std.configs/**` and `printers/*/local/**`, and `bringup_tmc.py` refuses a
+  StealthChop section instead of silently dropping the registers.
+
 ### Changed / Изменено
+
+- **RU:** Весь парк переведён в SpreadCycle с явным `stealthchop_threshold: 0`
+  (X/Y и экструдеры и раньше работали в SpreadCycle по умолчанию Klipper —
+  ключа просто не было). Z-модули пересчитаны на номинал 1.7 A
+  (`driver_HSTRT/HEND = 0/2`); `TBL=0` задан явно у всех моторов, включая
+  17HM19-модули, где ключ был закомментирован. Экструдеры — на фактические
+  0.55/0.60 A (`HSTRT/HEND` 7/4 и 7/5), `boards/fly-sb2040.cfg` пересчитан на
+  0.672 A. Токи экструдеров не повышаются. Из `bringup.sh` удалена
+  захардкоженная строка отчёта про Z 1.7 A; отчёт `bringup_tmc.py` печатает
+  TBL/TOFF/HSTRT/HEND и источник тока. `tmc_tune.py` применяет TBL/TOFF из
+  профиля, чтобы живой тест не расходился с модулем.
+  **EN:** The whole fleet now runs SpreadCycle with an explicit
+  `stealthchop_threshold: 0` (X/Y and the extruders already ran SpreadCycle
+  because Klipper defaults to it when the key is absent). The Z modules are
+  recalculated at the 1.7 A rating (`driver_HSTRT/HEND = 0/2`); `TBL=0` is now
+  explicit on every motor, including the 17HM19 modules where the key was
+  commented out. The extruders stay at their actual 0.55/0.60 A (`HSTRT/HEND`
+  7/4 and 7/5), and `boards/fly-sb2040.cfg` at 0.672 A. Extruder currents are
+  not raised. The hardcoded Z 1.7 A report line is removed from `bringup.sh`;
+  the `bringup_tmc.py` report prints TBL/TOFF/HSTRT/HEND and the current source.
+  `tmc_tune.py` applies TBL/TOFF from the profile so the live test matches the
+  module.
 
 - **RU:** `xy_driver` разделён на драйвер+мотор; `extruder_motor` заменён на
   `e_motor`. Z-модуль больше не включается механикой (`trident.cfg`/`v24.cfg`),

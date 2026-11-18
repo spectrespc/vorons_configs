@@ -75,6 +75,12 @@ E_DRIVER_BY_TOOLHEAD = {"sht36-v3": "tmc2209"}
 # the absolute module rating), while the M8P V2.0 has a selectable HV input
 # (24-60 V) for the driver rail.
 VM_XY_VALUES = ("48", "55")
+# SpreadCycle chopper inputs of tmc_calc.py, one pair per axis group.  The
+# fleet runs TBL=0 on every motor, so an omitted key resolves to the fleet
+# value rather than the tmc_calc.py CLI default.
+CHOPPER_DEFAULTS = {"xy": (0, 3), "z": (0, 3), "e": (0, 3)}
+TBL_VALUES = (0, 1, 2, 3)
+TOFF_VALUES = tuple(range(1, 16))
 VM_ZE = 24
 BOARD_VM_XY_MAX = {
     "manta-m5p": 48,
@@ -206,6 +212,14 @@ KNOWN_KEYS = {
     "frame_d",
     "z_base_measured",
     "z_leg_measured",
+    # SpreadCycle chopper inputs (docs/tmc/CALCS.md §3).  They are the TBL/TOFF
+    # arguments of tmc_calc.py, named per axis group.
+    "xy_tbl",
+    "xy_toff",
+    "z_tbl",
+    "z_toff",
+    "e_tbl",
+    "e_toff",
 }
 
 REQUIRED_KEYS = ("size", "model")
@@ -272,6 +286,47 @@ def motor_step_angle(name: str) -> str | None:
     if value is None:
         return None
     return "%g" % float(value)
+
+
+def _check_chopper_int(
+    values: dict[str, str], key: str, default: int, allowed: tuple[int, ...], label: str
+) -> int:
+    raw = str(values.get(key, "")).strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ProfileError("%s=%r is not an integer" % (key, raw))
+    if value not in allowed:
+        raise ProfileError("%s=%d is outside %s" % (key, value, label))
+    return value
+
+
+def check_chopper_pair(values: dict[str, str], axis: str) -> tuple[int, int]:
+    """``<axis>_tbl``/``<axis>_toff`` with range checks.
+
+    >>> check_chopper_pair({}, "xy")
+    (0, 3)
+    >>> check_chopper_pair({"xy_tbl": "0", "xy_toff": "3"}, "xy")
+    (0, 3)
+    >>> try:
+    ...     check_chopper_pair({"z_tbl": "9"}, "z")
+    ... except ProfileError as exc:
+    ...     print(str(exc).split(":")[0])
+    z_tbl=9 is outside 0..3
+    >>> try:
+    ...     check_chopper_pair({"e_toff": "0"}, "e")
+    ... except ProfileError as exc:
+    ...     print(str(exc))
+    e_toff=0 is outside 1..15
+    """
+    tbl_default, toff_default = CHOPPER_DEFAULTS[axis]
+    tbl = _check_chopper_int(values, "%s_tbl" % axis, tbl_default, TBL_VALUES, "0..3")
+    toff = _check_chopper_int(
+        values, "%s_toff" % axis, toff_default, TOFF_VALUES, "1..15"
+    )
+    return tbl, toff
 
 
 def check_step_angle(xy_step: str, xy_motor: str) -> None:
@@ -760,6 +815,7 @@ def validate(values: dict[str, str], strict: bool = True) -> dict[str, object]:
                 raise ProfileError("%s must be positive" % key)
 
     family = board_family(board)
+    chopper = {axis: check_chopper_pair(values, axis) for axis in CHOPPER_DEFAULTS}
     return {
         "size": size,
         "model": model,
@@ -779,6 +835,12 @@ def validate(values: dict[str, str], strict: bool = True) -> dict[str, object]:
         "head": head,
         "vm_xy": values["vm_xy"].strip(),
         "vm_ze": VM_ZE,
+        "xy_tbl": chopper["xy"][0],
+        "xy_toff": chopper["xy"][1],
+        "z_tbl": chopper["z"][0],
+        "z_toff": chopper["z"][1],
+        "e_tbl": chopper["e"][0],
+        "e_toff": chopper["e"][1],
         "features": features,
         "numeric": numeric,
     }
@@ -866,6 +928,7 @@ def build_includes(values: dict[str, str], checked: dict[str, object]) -> list[s
             includes.extend(path.format(board=family) for path in FEATURES[name])
 
     includes.append("std.macros/test_speed.cfg")
+    includes.append("std.macros/test_speed_z.cfg")
     includes.append("std.macros/test_kinematics.cfg")
     includes.append("anchors.cfg")
     includes.append("machine-extras.cfg")
@@ -958,6 +1021,12 @@ def machine_conf_text(checked: dict[str, object]) -> str:
         "e_motor=%s" % checked["e_motor"],
         "vm_xy=%s" % checked["vm_xy"],
         "vm_ze=%s" % checked["vm_ze"],
+        "xy_tbl=%s" % checked["xy_tbl"],
+        "xy_toff=%s" % checked["xy_toff"],
+        "z_tbl=%s" % checked["z_tbl"],
+        "z_toff=%s" % checked["z_toff"],
+        "e_tbl=%s" % checked["e_tbl"],
+        "e_toff=%s" % checked["e_toff"],
     ]
     if checked["toolhead"]:
         lines.append("toolhead=%s" % checked["toolhead"])

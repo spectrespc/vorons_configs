@@ -44,8 +44,11 @@ sha256sum docs/tmc/*.xlsx
 Значения в `motors.json` взяты из этих документов; поле `source` у каждой
 записи обязательно и проверяется скриптом при загрузке базы. Запись
 `MOONS-CSE14HRA1L410A-01` — мотор экструдера HGX 8T (NEMA14, 36 мм, шестерня
-8T); её `rated_current_a` используется `bringup.sh` для `[tmc2209 extruder]` и
-`[tmc2209 extruder_stepper ext-extruder]`. Таблица `motor_by_module` в том же
+8T). Её `rated_current_a` (1.0 A), `inductance_mh` и `resistance_ohm` нужны только
+для **расчёта чоппер-регистров** (`driver_HSTRT/HEND`) при фактических токах
+секций: `extruder` 0.55 A и `extruder_stepper ext-extruder` 0.60 A. Ток
+экструдеров до номинала не повышается — `--run-current` задаёт его явно, а
+`rated_current_a` используется лишь для вывода `i_factor_effective`. Таблица `motor_by_module` в том же
 файле сопоставляет имя TMC-модуля мотору и проверяется при загрузке.
 
 ## Формулы Klipper (для сверки регистров тока)

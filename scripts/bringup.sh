@@ -5,6 +5,7 @@
 #   deploy  deploy the profile and restart Klipper
 #   tmc     recompute every TMC driver at the motor nominal (tmc_calc), redeploy
 #   motion  find max_velocity/max_accel with TEST_SPEED (tmc_tune), apply
+#   z-motion find max_z_velocity/max_z_accel with TEST_SPEED_Z (tmc_tune), apply
 #   pid-e   PID_CALIBRATE the extruder at 250 C, patch local/pid.cfg, verify
 #   pid-b   PID_CALIBRATE the bed at 120 C, patch local/pid.cfg, verify
 #   done    summary and a suggested commit message (committing is manual)
@@ -33,21 +34,21 @@ YES=0
 DRY_RUN=0
 STATE_DIR="${BRINGUP_STATE_DIR:-$HOME/printer_data/.bringup}"
 HOLD_SECONDS="${BRINGUP_HOLD_SECONDS:-30}"
-STAGES=(deploy tmc motion pid-e pid-b done)
+STAGES=(deploy tmc motion z-motion pid-e pid-b done)
 DIED=0
 
 usage() {
   cat <<'EOF'
 Usage: bringup.sh -p PROFILE [options]
 
-Первичная настройка машины: deploy -> tmc -> motion -> pid-e -> pid-b -> done.
+Первичная настройка машины: deploy -> tmc -> motion -> z-motion -> pid-e -> pid-b -> done.
 Каждый этап пишет изменения в git-клон ~/vorons_configs, деплоит профиль и
 перезапускает Klipper через Moonraker. Коммит и push делает владелец.
 
   -p, --profile ID   профиль printers/<ID> (обязательно)
       --url URL      Moonraker (по умолчанию http://127.0.0.1:7125)
       --dest DIR     живой каталог Klipper (~/printer_data/config)
-      --from STAGE   начать с этапа (deploy|tmc|motion|pid-e|pid-b|done)
+      --from STAGE   начать с этапа (deploy|tmc|motion|z-motion|pid-e|pid-b|done)
       --only STAGE   выполнить только этот этап
       --skip LIST    пропустить этапы (через запятую, можно повторять)
       --state-dir D  каталог состояния (по умолчанию ~/printer_data/.bringup)
@@ -59,7 +60,7 @@ Usage: bringup.sh -p PROFILE [options]
   * git status клона пуст (есть что откатить через git checkout);
   * machine.conf валиден, committed profile.cfg не устарел, deploy --check зелёный;
   * uuids.cfg без REPLACE_WITH_;
-  * anchors.cfg без TODO для этапа motion;
+  * anchors.cfg без TODO для этапов motion/z-motion;
   * Moonraker: Klipper ready, печать не идёт, нагреватели < 45 C.
 
 Откат: git -C ~/vorons_configs checkout . && scripts/deploy_configs.sh -p ID -b,
@@ -239,10 +240,10 @@ stage_preflight() {
   fi
 
   if grep -q "TODO" "$PROFILE_DIR/anchors.cfg" 2>/dev/null; then
-    if stage_enabled motion; then
-      gate_fail "anchors.cfg содержит TODO: этап motion запрещён до измерений"
+    if stage_enabled motion || stage_enabled z-motion; then
+      gate_fail "anchors.cfg содержит TODO: этапы motion/z-motion запрещены до измерений"
     else
-      warn "anchors.cfg содержит TODO (этап motion пропущен, это допустимо)"
+      warn "anchors.cfg содержит TODO (этапы motion/z-motion пропущены, это допустимо)"
     fi
   fi
 
@@ -290,13 +291,14 @@ stage_deploy() {
 
 stage_tmc() {
   step "S2 tmc: номинальные токи и чоппер всех драйверов"
-  "$PYTHON_BIN" "$LIB/bringup_tmc.py" plan --profile "$PROFILE" \
-    --repo "$REPO" --dest "$DEST"
   if (( DRY_RUN )); then
+    echo "plan: bringup_tmc.py plan --profile $PROFILE --repo $REPO --dest $DEST"
     echo "plan: bringup_tmc.py apply -> tmc_calc.py --update-module ... --force"
     echo "plan: deploy_configs.sh -b, restart, wait ready"
     return 0
   fi
+  "$PYTHON_BIN" "$LIB/bringup_tmc.py" plan --profile "$PROFILE" \
+    --repo "$REPO" --dest "$DEST"
   "$PYTHON_BIN" "$LIB/bringup_tmc.py" apply --profile "$PROFILE" \
     --repo "$REPO" --dest "$DEST" || die "расчёт TMC не применён"
   if git -C "$REPO" diff --quiet -- std.configs; then
@@ -305,7 +307,7 @@ stage_tmc() {
   fi
   git -C "$REPO" diff --stat -- std.configs
   deploy_and_restart
-  ok "Z: 1.7 A при пределе 1.741 A (Rsense 0.110) — запас <2 %, CS=30/VSENSE=0 ожидаемы"
+  ok "TMC-модули пересчитаны (ток и чоппер) и развёрнуты"
 }
 
 stage_motion() {
@@ -332,6 +334,39 @@ stage_motion() {
   fi
   if ! "$PYTHON_BIN" "$SCRIPT_DIR/tmc_tune.py" "${tune_args[@]}"; then
     die "motion-этап не завершён (Klipper shutdown или ошибка tmc_tune); PID-этапы не запускаются"
+  fi
+  return 0
+}
+
+stage_z_motion() {
+  step "S4 z-motion: подбор max_z_velocity/max_z_accel"
+  local model
+  local tune_args=(--profile "printers/$PROFILE" --url "$URL" --run
+                   --apply --z-test --iterations 2 --dest "$DEST")
+  model="$(sed -n 's/^model=//p' "$PROFILE_DIR/machine.conf" | head -n 1)"
+  if [[ "$model" == "trident" ]]; then
+    warn "trident/z_tilt: перекос ловится по трём Z-моторам слабее, чем на v24; следите за гантри вручную"
+  fi
+  if (( YES )); then
+    tune_args+=(--yes)
+  fi
+  if (( DRY_RUN )); then
+    printf 'plan: tmc_tune.py %s\n' "${tune_args[*]}"
+    return 0
+  fi
+  if (( ! YES )); then
+    if [[ ! -t 0 ]]; then
+      die "этап z-motion требует подтверждения оператора (--yes в неинтерактивном режиме)"
+    fi
+    echo "ВНИМАНИЕ: Z-портал будет двигаться на предельных скоростях."
+    read -r -p "Оператор у E-stop? Продолжить? [y/N] " answer
+    case "$answer" in
+      y|Y|yes|Yes|да|Да) ;;
+      *) die "оператор не подтвердил этап z-motion" ;;
+    esac
+  fi
+  if ! "$PYTHON_BIN" "$SCRIPT_DIR/tmc_tune.py" "${tune_args[@]}"; then
+    die "z-motion-этап не завершён (перекос Z, Klipper shutdown или ошибка tmc_tune)"
   fi
   return 0
 }
@@ -411,11 +446,11 @@ TEMPERATURE_WAIT SENSOR=$sensor MINIMUM=$((target - 1))" >/dev/null; then
   ok "$label завершён, нагреватели выключены"
 }
 
-stage_pid_e() { pid_stage extruder 250 extruder 1500 "S4 pid-e"; }
-stage_pid_b() { pid_stage heater_bed 120 heater_bed 2700 "S5 pid-b"; }
+stage_pid_e() { pid_stage extruder 250 extruder 1500 "S5 pid-e"; }
+stage_pid_b() { pid_stage heater_bed 120 heater_bed 2700 "S6 pid-b"; }
 
 stage_done() {
-  step "S6 finalize: сводка для коммита"
+  step "S7 finalize: сводка для коммита"
   local vm_xy vm_ze velocity accel pid_list status
   vm_xy="$(sed -n 's/^vm_xy=//p' "$PROFILE_DIR/machine.conf" | head -n 1)"
   vm_ze="$(sed -n 's/^vm_ze=//p' "$PROFILE_DIR/machine.conf" | head -n 1)"

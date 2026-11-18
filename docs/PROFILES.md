@@ -61,6 +61,9 @@ Z-модули: пара Z задаётся только ключами проф
 | `head` | имя модуля хотэнда, например `HGX.8T` | необязательный; наличие `extruder/heads/<head>.cfg` |
 | `vm_xy` | `48`, `55` | `BOARD_VM_XY_MAX`: 48 В на M5P и M8P V1.x, 55 В только на M8P V2.0 |
 | `vm_ze` | `24` | всегда 24 В: Z и оба экструдера |
+| `xy_tbl`, `xy_toff` | TBL `0..3`, TOFF `1..15` | необязательные; входы чоппера X/Y, дефолт `0`/`3` |
+| `z_tbl`, `z_toff` | TBL `0..3`, TOFF `1..15` | необязательные; входы чоппера Z, дефолт `0`/`3` |
+| `e_tbl`, `e_toff` | TBL `0..3`, TOFF `1..15` | необязательные; входы чоппера обоих экструдеров, дефолт `0`/`3` |
 | `frame_w`, `frame_d` | мм | необязательные; положительные; `check_config.py` сверяет с размахом `z_positions` |
 | `z_base_measured`, `z_leg_measured` | мм | необязательные (trident); сверяются с `z_positions` из `anchors.cfg` |
 | `features` | `fans,display,buttons,belay,btt_sfs,runout,extra_extruder,host,y_frame,eddy,eddy_f` | необязательный; `belay`/`btt_sfs` требуют `extra_extruder`, `fans` требует `host`; `eddy` и `eddy_f` взаимоисключающие, требуют `toolhead=sht36-v3` и убирают `probe.cfg` |
@@ -178,9 +181,13 @@ python3 scripts/check_config.py --stale-check
 ./scripts/bringup.sh --profile my-voron
 ```
 
-Конвейер: `deploy → tmc → motion → pid-e → pid-b`. Этап `tmc` берёт моторы из
-`xy_motor`/`z_motor`/`e_motor` и рейлы `vm_xy`/`vm_ze`, пересчитывает токи и
-чоппер через `tmc_calc.py --update-module`.
+Конвейер: `deploy → tmc → motion → z-motion → pid-e → pid-b`. Этап `tmc` берёт
+моторы из `xy_motor`/`z_motor`/`e_motor`, рейлы `vm_xy`/`vm_ze` и входы чоппера
+`*_tbl/*_toff`; X/Y и Z пересчитываются на `--i-factor 1.0`, экструдеры — на
+фактический ток секции (`--run-current`). Этап `z-motion` подбирает
+`max_z_velocity`/`max_z_accel` макросом `TEST_SPEED_Z`: на каждого кандидата —
+scratch-файл в `std.config.local`, рестарт, повторное применение TMC, `G28`,
+выравнивание и прогон; перекос Z-моторов прерывает серию.
 
 ## Как добавить новую пару драйвер/мотор
 
@@ -231,6 +238,12 @@ toolhead=sht36-v3
 head=HGX.8T
 vm_xy=48
 vm_ze=24
+xy_tbl=0
+xy_toff=3
+z_tbl=2
+z_toff=3
+e_tbl=0
+e_toff=3
 frame_w=310
 frame_d=310
 features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame
@@ -261,6 +274,12 @@ toolhead=sht36-v3
 head=HGX.8T
 vm_xy=55
 vm_ze=24
+xy_tbl=0
+xy_toff=3
+z_tbl=2
+z_toff=3
+e_tbl=0
+e_toff=3
 frame_w=510
 frame_d=510
 features=belay,runout,btt_sfs,extra_extruder,fans,display,buttons,host,y_frame

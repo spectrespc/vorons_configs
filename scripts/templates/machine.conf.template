@@ -64,6 +64,17 @@ vm_xy=@VM_XY@
 # vm_ze — рейл питания Z и обоих экструдеров: всегда 24 В (проверяется).
 vm_ze=@VM_ZE@
 
+# Входы расчёта чоппера SpreadCycle (TBL/TOFF) для tmc_calc.py по группам осей.
+# Необязательные ключи: без них tmc_calc.py берёт TBL=2 / TOFF=3.
+# Парковые значения: все оси 0/3. Диапазоны: TBL 0..3, TOFF 1..15.
+# Подробнее: docs/tmc/CALCS.md §3 (blank time и slow decay).
+#xy_tbl=0
+#xy_toff=3
+#z_tbl=0
+#z_toff=3
+#e_tbl=0
+#e_toff=3
+
 # frame_w / frame_d — внешние габариты рамы, мм. По умолчанию size + 160.
 # check_config.py сверяет с ними размах z_positions.
 frame_w=@FRAME_W@

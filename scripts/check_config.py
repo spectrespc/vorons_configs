@@ -23,8 +23,10 @@ Exit status: 1 if at least one error was found, otherwise 0.
 Diagnostics:
   ERROR    missing/recursive include, parse error, two probe objects
            ([probe] + [probe_eddy_current ...]), physical [stepper_z]
-           endstop without position_endstop
-  WARNING  duplicate section name, repeated option (last-wins)
+           endstop without position_endstop, active stealthchop_threshold
+           >= 1000 (the fleet invariant is SpreadCycle)
+  WARNING  duplicate section name, repeated option (last-wins), TMC section
+           without an explicit stealthchop_threshold
   NOTICE   module .cfg under std.configs/ or std.macros/ that is not
            included by any profile and is not a known fleet alternative
 """
@@ -156,6 +158,178 @@ def parse_points(value: str) -> list[tuple[float, float]]:
     if len(numbers) % 2:
         raise ValueError("odd number of coordinates")
     return [(numbers[i], numbers[i + 1]) for i in range(0, len(numbers), 2)]
+
+
+# --- SpreadCycle invariant -------------------------------------------------
+
+TMC_HEADER_RE = re.compile(r"^tmc\d+$")
+
+
+def tmc_axis(stepper: str) -> str:
+    """Axis group of a TMC section target.
+
+    >>> [tmc_axis(name) for name in ("stepper_x", "stepper_z2", "extruder")]
+    ['xy', 'z', 'e']
+    """
+    if stepper in ("stepper_x", "stepper_y"):
+        return "xy"
+    if stepper.startswith("stepper_z"):
+        return "z"
+    return "e"
+
+
+def scan_tmc_sections(text: str) -> list[dict[str, object]]:
+    """Active ``[tmc<ic> ...]`` sections of one file and their options.
+
+    Commented options are not active, exactly like in Klipper's parser.
+
+    >>> found = scan_tmc_sections(
+    ...     "[tmc2209 stepper_z]\\nrun_current: 0.6\\n#stealthchop_threshold: 0\\n"
+    ...     "stealthchop_threshold: 999999  # park\\n\\n[mcu]\\nserial: /dev/x\\n")
+    >>> len(found), found[0]["header"], found[0]["options"]
+    (1, 'tmc2209 stepper_z', {'run_current': '0.6', 'stealthchop_threshold': '999999'})
+    """
+    sections: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped[0] in "#;":
+            continue
+        if raw[:1].isspace():
+            # Continuation of a multi-line value; it never starts a section.
+            continue
+        match = SECTCRE.match(stripped)
+        if match:
+            header = match.group("header").strip()
+            parts = header.split(None, 1)
+            if len(parts) >= 2 and TMC_HEADER_RE.match(parts[0].lower()):
+                current = {"header": header, "options": {}}
+                sections.append(current)
+            else:
+                current = None
+            continue
+        if current is None:
+            continue
+        match = OPTCRE.match(stripped)
+        if not match:
+            continue
+        value = match.group("value")
+        for marker in ("#", ";"):
+            value = value.split(marker, 1)[0]
+        options = current["options"]
+        assert isinstance(options, dict)
+        options[match.group("option").strip().lower()] = value.strip()
+    return sections
+
+
+def is_partial_layer(path: str) -> bool:
+    """True for a file that only reopens sections defined elsewhere.
+
+    ``machine-extras.cfg`` adds ``uart_pin`` to an existing Z stanza; the mode
+    key legitimately lives in the catalog module, so a missing
+    ``stealthchop_threshold`` here is not a diagnostic.
+    """
+    norm = _norm(os.path.abspath(path))
+    if "/std.config.local/" in norm or "/local/" in norm:
+        return True
+    return os.path.basename(norm) in OVERRIDE_FILES
+
+
+def tmc_mode_severity(
+    options: dict[str, str], partial: bool = False
+) -> str | None:
+    """Severity of one TMC section's ``stealthchop_threshold``.
+
+    ``partial`` is True for a merge layer that only reopens the section (the
+    mode key legitimately lives in the catalog module).
+
+    >>> tmc_mode_severity({"stealthchop_threshold": "999999"})
+    'error'
+    >>> tmc_mode_severity({"stealthchop_threshold": "0"}) is None
+    True
+    >>> tmc_mode_severity({})
+    'warning'
+    >>> tmc_mode_severity({}, partial=True) is None
+    True
+    >>> tmc_mode_severity({"stealthchop_threshold": "fast"})
+    'error'
+    """
+    raw = options.get("stealthchop_threshold")
+    if raw is None:
+        return None if partial else "warning"
+    try:
+        value = float(raw.split("#", 1)[0].strip())
+    except ValueError:
+        return "error"
+    return "error" if value >= 1000 else None
+
+
+def tmc_audit_paths(root: str) -> list[str]:
+    """Every source file that may declare a TMC section under ``root``.
+
+    The deployed tree flattens ``std.config.local`` next to ``printer.cfg``;
+    the repository keeps the local layer under ``printers/<id>/local``.  Both
+    layouts are covered, plus the profile override files that may reopen a TMC
+    section (machine-extras, anchors).
+    """
+    patterns = (
+        ("std.configs", "**", "*.cfg"),
+        ("std.config.local", "**", "*.cfg"),
+        ("printers", "*", "local", "**", "*.cfg"),
+        ("printers", "*", "machine-extras.cfg"),
+        ("printers", "*", "anchors.cfg"),
+    )
+    paths: list[str] = []
+    for parts in patterns:
+        paths.extend(glob.glob(os.path.join(root, *parts), recursive=True))
+    for name in ("machine-extras.cfg", "anchors.cfg"):
+        candidate = os.path.join(root, name)
+        if os.path.isfile(candidate):
+            paths.append(candidate)
+    return sorted(set(paths))
+
+
+def tmc_fix_command(
+    relative_file: str, section: dict[str, object], machine: dict[str, str]
+) -> str:
+    """Ready-to-run ``tmc_calc.py --update-module`` command for one section.
+
+    >>> section = {
+    ...     "header": "tmc2209 stepper_z",
+    ...     "options": {"run_current": "1.7"},
+    ... }
+    >>> tmc_fix_command(
+    ...     "std.configs/mechanics/tmc/4z-tmc2209-17hs4401s.cfg", section,
+    ...     {"z_motor": "17HS4401S", "z_tbl": "2", "z_toff": "3"})
+    'scripts/tmc_calc.py --update-module std.configs/mechanics/tmc/4z-tmc2209-17hs4401s.cfg --mode spreadcycle --vm 24 --sections stepper_z --motor 17HS4401S --i-factor 1.0 --tbl 2 --toff 3 --force'
+    """
+    header = str(section["header"])
+    stepper = header.split()[-1]
+    axis = tmc_axis(stepper)
+    vm = str(machine.get("vm_xy") or "48") if axis == "xy" else "24"
+    parts = [
+        "scripts/tmc_calc.py", "--update-module", relative_file,
+        "--mode", "spreadcycle", "--vm", vm, "--sections", stepper,
+    ]
+    motor = machine.get({"xy": "xy_motor", "z": "z_motor", "e": "e_motor"}[axis])
+    if motor:
+        parts += ["--motor", motor]
+    options = section["options"]
+    assert isinstance(options, dict)
+    if axis == "e":
+        current = options.get("run_current")
+        if current:
+            parts += ["--run-current", str(current)]
+        else:
+            parts += ["--i-factor", "1.0"]
+    else:
+        parts += ["--i-factor", "1.0"]
+    parts += [
+        "--tbl", str(machine.get("%s_tbl" % axis) or "2"),
+        "--toff", str(machine.get("%s_toff" % axis) or "3"),
+        "--force",
+    ]
+    return " ".join(parts)
 
 
 class Checker:
@@ -375,6 +549,80 @@ class Checker:
                     "%s is not included by any profile and is not a known "
                     "fleet alternative" % rel
                 )
+
+    # -- driver mode ---------------------------------------------------
+    def check_tmc_mode(self, root: str, machine_conf: str | None = None) -> None:
+        """Fleet invariant: every TMC section runs SpreadCycle explicitly.
+
+        An active ``stealthchop_threshold >= 1000`` makes Klipper switch the
+        driver to StealthChop, where TBL/TOFF/HSTRT/HEND do nothing.  A missing
+        key is SpreadCycle by Klipper default but implicit, so it is a warning.
+
+        The audit walks the source files, not the merged tree: unreachable
+        catalog files such as ``boards/fly-sb2040.cfg`` are fleet modules too
+        and must not escape the rule.
+        """
+        machine = self._machine_values(machine_conf)
+        seen: set[str] = set()
+        for path in tmc_audit_paths(root):
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            try:
+                text = self.read_file(path)
+            except OSError as exc:
+                self.warning("tmc-mode: cannot read %s: %s" % (path, exc))
+                continue
+            rel = _norm(_rel(path, root))
+            for section in scan_tmc_sections(text):
+                options = section["options"]
+                header = "[%s]" % section["header"]
+                where = "%s (%s)" % (rel, header)
+                raw = options.get("stealthchop_threshold")
+                severity = tmc_mode_severity(options, is_partial_layer(path))
+                if severity == "warning":
+                    self.warning(
+                        "tmc-mode: %s does not set stealthchop_threshold; "
+                        "Klipper then runs SpreadCycle by default, but the "
+                        "invariant wants the mode explicit. Add "
+                        "'stealthchop_threshold: 0' and recompute the "
+                        "chopper registers" % where
+                    )
+                elif severity == "error" and raw is not None:
+                    try:
+                        value = float(raw.split("#", 1)[0].strip())
+                    except ValueError:
+                        self.error(
+                            "tmc-mode: %s has a non-numeric "
+                            "stealthchop_threshold=%r" % (where, raw)
+                        )
+                        continue
+                    if value >= 1000:
+                        self.error(
+                            "tmc-mode: %s sets stealthchop_threshold=%s, so "
+                            "Klipper runs StealthChop and the chopper registers "
+                            "do nothing. The fleet invariant is SpreadCycle; "
+                            "fix it with:\n  %s"
+                            % (where, raw, tmc_fix_command(rel, section, machine))
+                        )
+
+    @staticmethod
+    def _machine_values(machine_conf: str | None) -> dict[str, str]:
+        values: dict[str, str] = {}
+        if not machine_conf or not os.path.isfile(machine_conf):
+            return values
+        try:
+            with open(machine_conf, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip()
+        except OSError:
+            return values
+        return values
 
     # -- object registration -------------------------------------------
     def check_probe_objects(self) -> None:
@@ -927,6 +1175,9 @@ def run_checks(
         for filename, include_dirs, local_dir, _machine in roots:
             checker.parse_file(filename, include_dirs, local_dir)
         checker.check_unused_modules(config_dir)
+        checker.check_tmc_mode(
+            config_dir, next((root[3] for root in roots if root[3]), None)
+        )
         sys.stdout.write(checker.merged_text())
         checker.emit(stream=sys.stderr)
         return 1 if checker.errors else 0
@@ -948,8 +1199,11 @@ def run_checks(
     orphan = Checker()
     orphan.included = all_included
     orphan.check_unused_modules(config_dir)
+    orphan.check_tmc_mode(
+        config_dir, next((root[3] for root in roots if root[3]), None)
+    )
     orphan.emit(stream=sys.stdout)
-    return 1 if had_errors else 0
+    return 1 if (had_errors or orphan.errors) else 0
 
 
 def stale_check(target: str | None) -> int:
