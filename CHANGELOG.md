@@ -218,6 +218,24 @@ Every entry is provided in Russian and English.
   catches that section pair. `boards/fly-sb2040.cfg` is untouched: it has its
   own self-contained `[probe]`.
 
+- **RU:** На стенде v24-350 LDC1612 отвечает по I2C-адресу `43`, а не `42`:
+  `LDC_CALIBRATE_DRIVE_CURRENT CHIP=fly_eddy_probe` по `42` возвращал
+  `START_READ_NACK` и переводил Klipper в shutdown, по `43` — `reg_drive_current:
+  15` (на `i2c_speed` 4 МГц и 400 кГц одинаково). Адрес задан перемычкой в
+  железе, поэтому переопределён в `printers/v24-350/machine-extras.cfg`:
+  `[probe_eddy_current fly_eddy_probe] i2c_address: 43`. README описывает
+  проверку адреса и обе раскладки (внешний FLY-EDDY-F — `42`, встроенный чип
+  SHT36 Max V3 — `43`).
+  **EN:** The v24-350 bench LDC1612 answers at I2C address `43`, not `42`:
+  `LDC_CALIBRATE_DRIVE_CURRENT CHIP=fly_eddy_probe` returned
+  `START_READ_NACK` at `42` and shut Klipper down, while `43` reported
+  `reg_drive_current: 15` (the same at `i2c_speed` 4 MHz and 400 kHz). The
+  address is strapped in hardware, so it is overridden in
+  `printers/v24-350/machine-extras.cfg`:
+  `[probe_eddy_current fly_eddy_probe] i2c_address: 43`. README documents the
+  address check and both layouts (external FLY-EDDY-F at `42`, built-in SHT36
+  Max V3 chip at `43`).
+
 ## [1.4.0] - 2026-11-15
 
 ### Added / Добавлено

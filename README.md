@@ -226,6 +226,22 @@ features=...,eddy_f
   `[probe_eddy_current fly_eddy_probe]`, поэтому рендер и `new_machine.sh`
   отклоняют такую пару.
 - Любая eddy-фича требует `toolhead=sht36-v3`: пины живут на MCU `extruder`.
+- Адрес LDC1612 задан strap-перемычкой в железе: `42` — у внешнего FLY-EDDY-F
+  из модуля, `43` — у встроенного чипа SHT36 Max V3. Поэтому адрес —
+  машинный факт и при другом чипе переопределяется в
+  `machine-extras.cfg` профиля:
+
+  ```ini
+  [probe_eddy_current fly_eddy_probe]
+  i2c_address: 43
+  ```
+
+  Проверка адреса — `LDC_CALIBRATE_DRIVE_CURRENT CHIP=fly_eddy_probe`: успех
+  печатает `reg_drive_current: N`, неверный адрес даёт
+  `MCU 'extruder' I2C request to addr 42 reports error START_READ_NACK` и
+  shutdown. На стенде v24-350 чип отвечает по `43` (проверено 2026-11-18),
+  override стоит в его `machine-extras.cfg`; рабочий `i2c_speed` там же
+  остаётся `4000000`.
 - При `eddy_f` (как и при `eddy`) рендерер **не включает**
   `std.configs/probe.cfg`: Klipper не даёт одновременно зарегистрировать
   `[probe]` и `[probe_eddy_current]`. Z-хоуминг остаётся на
@@ -843,8 +859,8 @@ Klipper, прошивает платы, запускает Klipper и запис
 - Гибрид на v24-350 (парковка Z по концевику, QGL и `bed_mesh` по eddy)
   включён в коммитнутом профиле и загружается на стенде (2026-11-18: `probe` —
   это `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` видит `stepper_z`,
-  в логе нет `Registering duplicate object` и `Timer too close`), но
-  калибровки и прогоны QGL/mesh ещё не выполнены: до
+  LDC1612 отвечает по адресу `43`, в логе нет `Registering duplicate object` и
+  `Timer too close`), но калибровки и прогоны QGL/mesh ещё не выполнены: до
   `PROBE_EDDY_CURRENT_CALIBRATE` щуп не откалиброван, а `position_endstop`
   остаётся плейсхолдером. `check_config.py` ловит обе типовые ошибки такой
   сборки — `[probe]` вместе с `[probe_eddy_current]` и физический
@@ -1089,6 +1105,22 @@ features=...,eddy_f
   reject that pair.
 - Any eddy feature requires `toolhead=sht36-v3`: its pins live on the
   `extruder` MCU.
+- The LDC1612 I2C address is strapped in hardware: `42` on the external
+  FLY-EDDY-F of the module, `43` on the built-in SHT36 Max V3 chip. The
+  address is therefore a machine fact and is overridden in the profile's
+  `machine-extras.cfg` when the chip differs:
+
+  ```ini
+  [probe_eddy_current fly_eddy_probe]
+  i2c_address: 43
+  ```
+
+  Check it with `LDC_CALIBRATE_DRIVE_CURRENT CHIP=fly_eddy_probe`: success
+  prints `reg_drive_current: N`, a wrong address gives
+  `MCU 'extruder' I2C request to addr 42 reports error START_READ_NACK` and a
+  shutdown. The v24-350 bench chip answers at `43` (verified 2026-11-18), so
+  its `machine-extras.cfg` carries the override; `i2c_speed` there stays
+  `4000000`.
 - With `eddy_f` (and with `eddy`) the renderer **does not include**
   `std.configs/probe.cfg`: Klipper cannot register `[probe]` and
   `[probe_eddy_current]` at the same time. Z homing stays on the mechanics
@@ -1708,8 +1740,9 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
 - The v24-350 hybrid (park Z on the switch, QGL and `bed_mesh` on the eddy) is
   enabled in the committed profile and loads on the bench (2026-11-18: `probe`
   is `probe_eddy_current fly_eddy_probe`, `QUERY_ENDSTOPS` reports `stepper_z`,
-  and the log has no `Registering duplicate object` or `Timer too close`), but
-  the calibrations and the QGL/mesh runs are still pending: before
+  the LDC1612 answers at address `43`, and the log has no
+  `Registering duplicate object` or `Timer too close`), but the calibrations
+  and the QGL/mesh runs are still pending: before
   `PROBE_EDDY_CURRENT_CALIBRATE` the sensor is uncalibrated and
   `position_endstop` is a placeholder. `check_config.py` now catches the two
   typical mistakes of such a build: `[probe]` together with
