@@ -226,7 +226,14 @@ class Moonraker:
     def wait_ready(self, timeout: float = 60.0, poll: float = 1.0) -> None:
         deadline = time.time() + timeout
         while True:
-            state = self.klipper_state()
+            try:
+                state = self.klipper_state()
+            except MoonrakerError as exc:
+                # A restart makes Moonraker answer 503 "Klippy Host not
+                # connected" until Klipper is back: startup, not failure.
+                if "HTTP 503" not in str(exc):
+                    raise
+                state = "startup"
             if state == "ready":
                 return
             if state in ("shutdown", "error"):
@@ -330,7 +337,10 @@ class Moonraker:
 
     def log_tail(self, lines: int = 50) -> list[str]:
         """Last lines of klippy.log (only when the host path is readable)."""
-        path = self.printer_info().get("log_file")
+        try:
+            path = self.printer_info().get("log_file")
+        except MoonrakerError:
+            return []
         if not path or not os.path.isfile(path):
             return []
         try:
@@ -508,7 +518,8 @@ def selftest() -> int:
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    state = {"restarts": 0, "scripts": [], "polls": 0, "legacy": True}
+    state = {"restarts": 0, "scripts": [], "polls": 0, "legacy": True,
+             "connecting": 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # silence the test server
@@ -525,6 +536,10 @@ def selftest() -> int:
         def do_GET(self):
             path = self.path.split("?")[0]
             if path == "/printer/info":
+                if state["connecting"] > 0:
+                    state["connecting"] -= 1
+                    self._send({"error": {"message": "Klippy Host not connected"}}, 503)
+                    return
                 state["polls"] += 1
                 # First two polls report startup, then ready.
                 current = "startup" if state["polls"] <= 2 else "ready"
@@ -578,6 +593,9 @@ def selftest() -> int:
         check("server_info", api.server_info()["moonraker_version"] == "test")
         api.wait_ready(10, poll=0.05)
         check("wait_ready polls startup then ready", state["polls"] >= 3)
+        state["connecting"] = 2
+        api.wait_ready(10, poll=0.05)
+        check("wait_ready survives restart 503", state["connecting"] == 0)
         check("print_state", api.print_state() == "printing")
         temps = api.temperatures()
         check("temperatures", abs(temps["extruder"] - 21.5) < 1e-9)
