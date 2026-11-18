@@ -64,7 +64,7 @@ Usage: bringup.sh -p PROFILE [options]
   * Moonraker: Klipper ready, печать не идёт, нагреватели < 45 C.
 
 Откат: git -C ~/vorons_configs checkout . && scripts/deploy_configs.sh -p ID -b,
-затем POST /machine/restart (или перезапуск klipper).
+затем POST /machine/restart (на Moonraker v0.10 — /machine/services/restart).
 EOF
 }
 
@@ -283,7 +283,7 @@ stage_deploy() {
   step "S1 deploy: $PROFILE"
   if (( DRY_RUN )); then
     echo "plan: deploy_configs.sh -p $PROFILE -d $DEST -b"
-    echo "plan: POST /machine/restart, ждать /printer/info state=ready (60 с)"
+    echo "plan: POST /machine/restart (fallback /machine/services/restart), ждать state=ready (60 с)"
     return 0
   fi
   deploy_and_restart

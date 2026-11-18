@@ -555,7 +555,7 @@ cd ~/vorons_configs
 
 | Этап | Что делает |
 |---|---|
-| `deploy` | `deploy_configs.sh -p <id> -b`, затем `POST /machine/restart` и ожидание `ready` (60 с) |
+| `deploy` | `deploy_configs.sh -p <id> -b`, затем `POST /machine/restart` (на Moonraker v0.10 — `/machine/services/restart`) и ожидание `ready` (60 с) |
 | `tmc` | `check_config.py --merged` даёт живой список `[tmc*]`; для каждой секции берутся мотор (`xy_motor` / `z_motor` / `e_motor`) и рейл (`vm_xy` для X/Y, `vm_ze` для Z/E), `tmc_calc.py --update-module` переписывает ток и чоппер, затем deploy + restart |
 | `motion` | `tmc_tune.py --run --apply --iterations 2`: лестница `TEST_SPEED`, вердикт по `GET_POSITION`, бисекция, запись пары в `machine-extras.cfg`; требует подтверждения оператора |
 | `z-motion` | `tmc_tune.py --run --apply --z-test --iterations 2`: лестница `max_z_velocity`/`max_z_accel`, на каждого кандидата запись `std.config.local/z_speed_test.cfg`, рестарт, повторное применение TMC, `G28`, выравнивание и `TEST_SPEED_Z`; перекос Z-моторов прерывает серию; требует подтверждения оператора |
@@ -1410,7 +1410,7 @@ cd ~/vorons_configs
 
 | Stage | What it does |
 |---|---|
-| `deploy` | `deploy_configs.sh -p <id> -b`, then `POST /machine/restart` and wait for `ready` (60 s) |
+| `deploy` | `deploy_configs.sh -p <id> -b`, then `POST /machine/restart` (on Moonraker v0.10 `/machine/services/restart`) and wait for `ready` (60 s) |
 | `tmc` | `check_config.py --merged` gives the live `[tmc*]` list; each section gets its motor (`xy_motor` / `z_motor` / `e_motor`) and rail (`vm_xy` for X/Y, `vm_ze` for Z/E), `tmc_calc.py --update-module` rewrites current and chopper, then deploy + restart |
 | `motion` | `tmc_tune.py --run --apply --iterations 2`: `TEST_SPEED` ladder, verdict from `GET_POSITION`, bisection, pair written to `machine-extras.cfg`; needs operator confirmation |
 | `z-motion` | `tmc_tune.py --run --apply --z-test --iterations 2`: `max_z_velocity`/`max_z_accel` ladder; per candidate it writes `std.config.local/z_speed_test.cfg`, restarts, re-applies the TMC settings, homes, levels the gantry and runs `TEST_SPEED_Z`; a Z skew aborts the series; needs operator confirmation |

@@ -190,8 +190,18 @@ class Moonraker:
         return entries if isinstance(entries, list) else []
 
     def restart(self) -> object:
-        """Restart Klipper through Moonraker (no sudo/systemctl)."""
-        return self.post("/machine/restart", {"service": "klipper"})
+        """Restart Klipper through Moonraker (no sudo/systemctl).
+
+        Newer Moonraker builds expose ``/machine/restart``; v0.10 (the bench
+        runs v0.10.0-31) only has ``/machine/services/restart`` and answers 404
+        to the newer path.
+        """
+        try:
+            return self.post("/machine/restart", {"service": "klipper"})
+        except MoonrakerError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+            return self.post("/machine/services/restart", {"service": "klipper"})
 
     # -- state helpers -----------------------------------------------------
 
@@ -441,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
             api.gcode(" ".join(args.args))
         elif args.command == "restart":
             api.restart()
-            print("restart: отправлен запрос /machine/restart")
+            print("restart: запрос на перезапуск Klipper отправлен")
         elif args.command == "store":
             print(json.dumps(api.gcode_store(args.count), ensure_ascii=False, indent=2))
         elif args.command == "cursor":
@@ -498,7 +508,7 @@ def selftest() -> int:
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    state = {"restarts": 0, "scripts": [], "polls": 0}
+    state = {"restarts": 0, "scripts": [], "polls": 0, "legacy": True}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # silence the test server
@@ -542,6 +552,12 @@ def selftest() -> int:
                 state["scripts"].append(body.get("script"))
                 self._send({"result": "ok"})
             elif self.path.startswith("/machine/restart"):
+                if state["legacy"]:
+                    self._send({"error": {"message": "not found"}}, 404)
+                else:
+                    state["restarts"] += 1
+                    self._send({"result": "ok"})
+            elif self.path.startswith("/machine/services/restart"):
                 state["restarts"] += 1
                 self._send({"result": "ok"})
             else:
@@ -572,7 +588,10 @@ def selftest() -> int:
         fresh, _ = api.store_since(1.5)
         check("store cursor filters old entries", len(fresh) == 1)
         api.restart()
-        check("restart posted", state["restarts"] == 1)
+        check("restart falls back to services/restart", state["restarts"] == 1)
+        state["legacy"] = False
+        api.restart()
+        check("restart uses /machine/restart when present", state["restarts"] == 2)
         try:
             api.get("/missing")
         except MoonrakerError as exc:
