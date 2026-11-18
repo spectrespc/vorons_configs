@@ -277,14 +277,14 @@ features=...,eddy_f
 
 Рецепт — `endstop_pin` в `machine-extras.cfg` профиля (`[stepper_z]` там уже
 переопределён пинами Z-моторов), а сам `position_endstop` — в `printer.cfg`
-этого профиля (seed, машинный файл):
+этого профиля (машинный файл, управляется до маркера `SAVE_CONFIG`):
 
 ```ini
 # machine-extras.cfg
 [stepper_z]
 endstop_pin: !SENS_2
 
-# printer.cfg (seed) — дефолт профиля, затем калибровка
+# printer.cfg — дефолт профиля, затем калибровка
 [stepper_z]
 position_endstop: -0.520
 ```
@@ -311,10 +311,10 @@ included value`), а `printer.cfg` — главный файл: при `SAVE_CON
    значение комментарием заменяет плейсхолдер в `printer.cfg` и попадает в
    autosave. В git калиброванное значение не уходит.
 
-`printer.cfg` — seed: `deploy_configs.sh` создаёт его только на новой машине и
-никогда не перезаписывает. Если файл пересоздан, Klipper поднимется на
-плейсхолдере `-0.520`, и калибровку концевика нужно выполнить заново до первой
-печати.
+`printer.cfg` — частично управляемый: деплой заменяет всё выше маркера
+`SAVE_CONFIG` копией из профиля, а калиброванное значение живёт в блоке ниже и
+сохраняется. Если файл пересоздан, Klipper поднимется на плейсхолдере `-0.520`,
+и калибровку концевика нужно выполнить заново до первой печати.
 
 Калибровать eddy нужно с `ACCEPT` на 0.3–0.5 мм выше соприкосновения сопла:
 если катушка стоит низко над соплом (≈1 мм), точка контакта попадает в
@@ -381,7 +381,7 @@ vorons_configs/
 │   └── voron-t/
 │       ├── machine.conf        # оси и фичи машины (единственный источник выбора)
 │       ├── profile.cfg         # ГЕНЕРИРУЕТСЯ из machine.conf, коммитится
-│       ├── printer.cfg         # seed: [include profile.cfg] + std.config.local/*
+│       ├── printer.cfg         # управляется до маркера SAVE_CONFIG, autosave внизу
 │       ├── anchors.cfg         # managed: измеренные якоря и фактические лимиты
 │       ├── machine-extras.cfg  # managed: машинные override (idle_timeout и т.п.)
 │       ├── macros.cfg          # managed: макросы профиля
@@ -424,11 +424,15 @@ Git-репозиторий живёт только в `~/vorons_configs`. Жив
 - **managed** — перезаписываются при каждом деплое: `profile.cfg`, `machine.conf`,
   `anchors.cfg`, `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`,
   `local/*.cfg` → `std.config.local/`, весь `std.configs/` и `std.macros/`.
-- **seed** — создаются только если файла ещё нет: `printer.cfg`,
-  `KlipperScreen.conf`, `crowsnest.conf`, `sonar.conf`, `telegram.conf`.
-  `printer.cfg` — seed, потому что Klipper дописывает в него блок `SAVE_CONFIG`;
-  при первом деплое после 1.1.0 старый манифест автоматически заменяется
-  заглушкой (с резервной копией, а существующий autosave-блок переносится).
+- **seed** — создаются только если файла ещё нет: `KlipperScreen.conf`,
+  `crowsnest.conf`, `sonar.conf`, `telegram.conf`.
+- **`printer.cfg` — частично управляемый.** При каждом деплое всё выше маркера
+  `#*# <---------------------- SAVE_CONFIG ---------------------->` заменяется
+  копией из `printers/<id>/printer.cfg`, а маркер и autosave-блок ниже
+  сохраняются побайтно (`scripts/merge_printer_cfg.py`). Опция в голове файла,
+  которую определяет и autosave, комментируется: иначе Klipper отдал бы
+  приоритет голове и калибровка потерялась бы. При `-b` старая версия уходит в
+  `DEST/.backup/<ts>/`.
 - `std.compil.configs/` в живой каталог не выкладывается: это исходники прошивок.
 - `--prune` (по умолчанию) удаляет только известные устаревшие пути:
   `std.configs/{gantry,pinout,tc.ext}/`, корневой `printers/` (осколок 1.1.0),
@@ -475,7 +479,7 @@ git commit -m "Tune voron-t" && git push
 
 Мастер генерирует `machine.conf` из эталонного
 `scripts/templates/machine.conf.template` (русские комментарии у каждого
-ключа), создаёт seed-заглушку `printer.cfg`, `anchors.cfg` с TODO,
+ключа), создаёт `printer.cfg` с дефолтами, `anchors.cfg` с TODO,
 `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`, `local/`, рендерит
 `profile.cfg` и валидирует профиль. Пара X/Y и Z-пара по умолчанию берутся по
 правилу парка и archetype; переопределяются флагами `--xy-motor`, `--xy-driver`,
@@ -910,7 +914,7 @@ Klipper, прошивает платы, запускает Klipper и запис
   `Timer too close`). Таблица `calibrate` eddy снята на стенде (диапазон
   ~277 кГц, шум ~1 мкм при 1–3 мм) и сохранена в autosave;
   `position_endstop` концевика хранится в `printer.cfg` профиля (плейсхолдер
-  в seed, калиброванное значение — в autosave). Нуль eddy сводится со столом
+  выше маркера `SAVE_CONFIG`, калиброванное значение — в autosave). Нуль eddy сводится со столом
   через `PROBE` + `Z_OFFSET_APPLY_PROBE`; прогоны QGL/mesh и первый слой — за
   оператором.
   `check_config.py` ловит обе типовые ошибки такой сборки — `[probe]` вместе с
@@ -1207,14 +1211,14 @@ the M3-STOP switch (`SENS_2`), while `QUAD_GANTRY_LEVEL` and
 
 The recipe keeps `endstop_pin` in the profile's `machine-extras.cfg`
 (`[stepper_z]` already reopens there for the Z motor pins) and puts
-`position_endstop` into that profile's `printer.cfg` (the machine-local seed):
+`position_endstop` into that profile's `printer.cfg` (machine-local, managed up to the `SAVE_CONFIG` marker):
 
 ```ini
 # machine-extras.cfg
 [stepper_z]
 endstop_pin: !SENS_2
 
-# printer.cfg (seed), profile default before calibration
+# printer.cfg, profile default before calibration
 [stepper_z]
 position_endstop: -0.520
 ```
@@ -1240,10 +1244,10 @@ There are two calibrations:
    the value comments out the placeholder in `printer.cfg` and lands in the
    autosave, so git never sees a calibrated value.
 
-`printer.cfg` is a seed: `deploy_configs.sh` creates it only on a new machine
-and never overwrites it. If the file is recreated, Klipper boots on the
-`-0.520` placeholder and the endstop has to be calibrated again before the first
-print.
+`printer.cfg` is partially managed: a deploy replaces everything above the
+`SAVE_CONFIG` marker from the profile and keeps the calibrated block below it.
+If the file is recreated, Klipper boots on the `-0.520` placeholder and the
+endstop has to be calibrated again before the first print.
 
 Calibrate the eddy with `ACCEPT` 0.3-0.5 mm above nozzle contact: when the coil
 sits low over the nozzle (about 1 mm), the contact point lands in the flat part
@@ -1309,7 +1313,7 @@ vorons_configs/
 │   └── voron-t/
 │       ├── machine.conf        # machine axes and features (single source of choice)
 │       ├── profile.cfg         # GENERATED from machine.conf, committed
-│       ├── printer.cfg         # seed: [include profile.cfg] + std.config.local/*
+│       ├── printer.cfg         # head-managed: includes + autosave at the end
 │       ├── anchors.cfg         # managed: measured anchors and real limits
 │       ├── machine-extras.cfg  # managed: machine overrides (idle_timeout, ...)
 │       ├── macros.cfg          # managed: profile macros
@@ -1351,11 +1355,15 @@ The git repository lives only in `~/vorons_configs`. The live directory
 - **managed** — overwritten on every deploy: `profile.cfg`, `machine.conf`,
   `anchors.cfg`, `machine-extras.cfg`, `macros.cfg`, `moonraker.conf`,
   `local/*.cfg` → `std.config.local/`, all of `std.configs/` and `std.macros/`.
-- **seed** — created only when missing: `printer.cfg`, `KlipperScreen.conf`,
-  `crowsnest.conf`, `sonar.conf`, `telegram.conf`. `printer.cfg` is a seed because
-  Klipper appends `SAVE_CONFIG` output to it; on the first deploy after 1.1.0 the
-  old manifest is replaced automatically (with a backup, and an existing autosave
-  block is carried over).
+- **seed** — created only when missing: `KlipperScreen.conf`, `crowsnest.conf`,
+  `sonar.conf`, `telegram.conf`.
+- **`printer.cfg` is partially managed.** Every deploy replaces everything above
+  the `#*# <---------------------- SAVE_CONFIG ---------------------->` marker
+  with the copy from `printers/<id>/printer.cfg` and keeps the marker and the
+  autosave block below it verbatim (`scripts/merge_printer_cfg.py`). A head option
+  that the autosave also defines is commented out: Klipper gives the regular
+  config priority, so an active head value would shadow the calibration. With `-b`
+  the previous version moves to `DEST/.backup/<ts>/`.
 - `std.compil.configs/` is never deployed: it holds firmware build configs.
 - `--prune` (default) removes only known legacy paths:
   `std.configs/{gantry,pinout,tc.ext}/`, the root `printers/` leftover from 1.1.0,
@@ -1402,7 +1410,7 @@ git commit -m "Tune voron-t" && git push
 
 The wizard generates `machine.conf` from the canonical
 `scripts/templates/machine.conf.template` (Russian comments for every key),
-creates a seed `printer.cfg`, a TODO `anchors.cfg`, `machine-extras.cfg`,
+creates a `printer.cfg` with defaults, a TODO `anchors.cfg`, `machine-extras.cfg`,
 `macros.cfg`, `moonraker.conf`, `local/`, renders `profile.cfg` and validates the
 profile. The X/Y and Z pairs default to the fleet/archetype rule and can be
 overridden with `--xy-motor`, `--xy-driver`, `--z-driver`, `--z-motor`,
@@ -1839,7 +1847,7 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   `Registering duplicate object` or `Timer too close`). The eddy `calibrate`
   table is measured on the bench (~277 kHz span, ~1 um of noise at 1-3 mm) and
   stored in the autosave; the switch `position_endstop` lives in the profile's
-  `printer.cfg` (placeholder in the seed, calibrated value in the autosave).
+  `printer.cfg` (profile default above the marker, calibrated value in the autosave).
   The eddy zero is matched to the bed with
   `PROBE` + `Z_OFFSET_APPLY_PROBE`; the QGL/mesh runs and the first layer are
   still with the operator. `check_config.py` now

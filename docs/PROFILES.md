@@ -11,7 +11,7 @@
 printers/<id>/
 ├── machine.conf        # ИСТОЧНИК: оси, драйверы, моторы, рейлы, фичи
 ├── profile.cfg         # ГЕНЕРИРУЕТСЯ из machine.conf, коммитится
-├── printer.cfg         # seed: [include profile.cfg] + autosave SAVE_CONFIG
+├── printer.cfg         # управляется до маркера SAVE_CONFIG, autosave внизу
 ├── anchors.cfg         # измеренные точки стола/парковки (managed)
 ├── machine-extras.cfg  # машинные override'ы (managed)
 ├── macros.cfg          # макросы машины (managed)
@@ -104,7 +104,7 @@ Z-модули: пара Z задаётся только ключами проф
   концевиком нельзя. Если у машины с `eddy`/`eddy_f` Z паркуется аппаратным
   концевиком, профиль задаёт `endstop_pin` в `machine-extras.cfg`
   (managed-слой, `[stepper_z]` там уже переопределён), а `position_endstop` —
-  в seed-файле `printer.cfg` этого профиля:
+  в `printer.cfg` этого профиля (управляется деплоем до маркера `SAVE_CONFIG`):
 
   ```ini
   # machine-extras.cfg
@@ -143,7 +143,7 @@ cd ~/vorons_configs
 
 Мастер генерирует `machine.conf` из
 `scripts/templates/machine.conf.template` (русские комментарии у каждого
-ключа), создаёт seed-файлы и `local/uuids.cfg`, затем рендерит `profile.cfg`
+ключа), создаёт `printer.cfg`, остальные файлы профиля и `local/uuids.cfg`, затем рендерит `profile.cfg`
 и валидирует профиль через `check_config.py --machine`.
 
 Полезные флаги: `--xy-motor`, `--xy-driver`, `--z-driver`, `--z-motor`,

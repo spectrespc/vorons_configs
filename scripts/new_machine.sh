@@ -250,8 +250,10 @@ PY
 cat > "$PROFILE_DIR/printer.cfg" <<'EOF'
 # Seed manifest for this Klipper profile.
 #
-# This file is a SEED: deploy_configs.sh creates it only when it is missing and
-# never overwrites it. Klipper's SAVE_CONFIG appends its autosave block here.
+# This file is partially managed: deploy_configs.sh replaces everything above
+# the SAVE_CONFIG marker from this profile on every deploy and keeps the marker
+# with the autosave block below it. Klipper's SAVE_CONFIG appends calibrated
+# values below that marker.
 #
 # The include list itself is generated from machine.conf into profile.cfg.
 [include profile.cfg]

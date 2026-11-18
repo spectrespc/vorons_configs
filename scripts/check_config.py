@@ -137,6 +137,44 @@ def is_catalog_module(path: str) -> bool:
     return any("/%s" % prefix in norm + "/" for prefix in CATALOG_PREFIXES)
 
 
+AUTOSAVE_PREFIX = "#*# "
+AUTOSAVE_MARKER_RE = re.compile(r"^#\*# <.*SAVE_CONFIG")
+
+
+def autosave_to_config(text: str) -> str:
+    r"""Expose Klipper's SAVE_CONFIG block as regular config lines.
+
+    Klipper keeps the autosave block commented with a "#*# " prefix below a
+    fixed header and strips the prefix when it loads printer.cfg. A validator
+    that reads the file verbatim would miss every calibrated value, so the
+    header is dropped and the prefix removed here as well.
+
+    >>> autosave_to_config(
+    ...     "# head\n"
+    ...     "#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+    ...     "#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+    ...     "#*#\n"
+    ...     "#*# [stepper_z]\n"
+    ...     "#*# position_endstop = -0.03\n"
+    ... )
+    '# head\n\n\n\n[stepper_z]\nposition_endstop = -0.03\n'
+    >>> autosave_to_config("[stepper_z]\nposition_endstop: -0.52\n")
+    '[stepper_z]\nposition_endstop: -0.52\n'
+    """
+    lines = []
+    for line in text.split("\n"):
+        if not line.strip() or line.rstrip() == "#*#":
+            lines.append("")
+        elif AUTOSAVE_MARKER_RE.match(line):
+            lines.append("")
+        elif line.startswith(AUTOSAVE_PREFIX):
+            content = line[len(AUTOSAVE_PREFIX):]
+            lines.append("" if content.startswith("DO NOT EDIT") else content)
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def is_merge_layer(path: str) -> bool:
     """True when a file is expected to reopen/override earlier sections."""
     norm = _norm(os.path.abspath(path))
@@ -364,7 +402,8 @@ class Checker:
     @staticmethod
     def read_file(filename: str) -> str:
         with open(filename, "r", encoding="utf-8", errors="replace") as fh:
-            return fh.read().replace("\r\n", "\n")
+            text = fh.read().replace("\r\n", "\n")
+        return autosave_to_config(text)
 
     def _append(self, buf: list[tuple[int, str]], filename: str) -> None:
         if not buf:

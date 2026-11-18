@@ -128,6 +128,26 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** `deploy_configs.sh` теперь управляет `printer.cfg` до маркера
+  `#*# <---------------------- SAVE_CONFIG ---------------------->`: при каждом
+  деплое голова файла заменяется копией из `printers/<id>/printer.cfg`, а
+  маркер и autosave-блок ниже сохраняются побайтно. Новый
+  `scripts/merge_printer_cfg.py` собирает файл и комментирует опции головы,
+  которые определяет autosave — иначе Klipper отдаёт приоритет обычному
+  конфигу и калибровка теряется. `check_config.py` читает autosave-блок так же,
+  как Klipper (снимает префикс `#*# `), поэтому staging и деплой-проверки видят
+  калиброванные значения; `printer.cfg` переведён из seed в частично
+  управляемые.
+  **EN:** `deploy_configs.sh` now manages `printer.cfg` up to the
+  `#*# <---------------------- SAVE_CONFIG ---------------------->` marker: every
+  deploy replaces the head with `printers/<id>/printer.cfg` and keeps the marker
+  and the autosave block below it verbatim. The new
+  `scripts/merge_printer_cfg.py` builds that file and comments head options that
+  the autosave also defines - otherwise Klipper prefers the regular config and
+  the calibration is lost. `check_config.py` reads the autosave block the way
+  Klipper does (strips the `#*# ` prefix), so staging and deploy checks see the
+  calibrated values; `printer.cfg` moved from seed to partially managed.
+
 - **RU:** В гибридном Z профиля `v24-350` значение `[stepper_z]
   position_endstop` перенесено из `machine-extras.cfg` в seed-файл
   `printer.cfg`: это индивидуальная настройка, и теперь её штатно сохраняет

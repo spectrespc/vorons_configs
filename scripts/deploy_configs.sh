@@ -7,9 +7,12 @@
 # validates it with check_config.py and only then writes to DEST.
 #
 # Managed files are overwritten on every deploy. Seed files are created only
-# when missing. printer.cfg is a seed because Klipper's SAVE_CONFIG appends its
-# autosave block there; the block is carried into staging for validation but is
-# never rewritten from the repository.
+# when missing. printer.cfg is partially managed: everything above the
+# SAVE_CONFIG marker is replaced from printers/<profile>/printer.cfg on every
+# deploy, while the marker line and the autosave block below it are preserved
+# verbatim. merge_printer_cfg.py builds that file and comments out head options
+# that the autosave already defines, because Klipper lets the regular config
+# shadow the autosave in that case.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,10 +45,15 @@ Managed (always overwritten):
   std.macros/**                                       -> DEST/std.macros/
 
 Seed (copied only when missing in DEST):
-  printer.cfg, KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf
+  KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf
 
-printer.cfg is a seed because Klipper writes SAVE_CONFIG output into it. It is
-never overwritten by the repository copy.
+printer.cfg is partially managed: on every deploy everything above the
+  #*# <---------------------- SAVE_CONFIG ---------------------->
+marker is replaced from printers/<profile>/printer.cfg, and the marker with the
+autosave block below it (Klipper's calibrated values) is preserved verbatim.
+A head option that the autosave also defines is commented out, matching what
+Klipper leaves behind after SAVE_CONFIG; otherwise the seeded value would
+shadow the calibration.
 
 std.compil.configs/ is never deployed: it holds MCU build configs for
 scripts/build_mcu.sh, not runtime Klipper configuration.
@@ -244,17 +252,13 @@ mkdir -p -- "$STAGE/std.config.local"
 render --output "$STAGE/profile.cfg" "${axis_args[@]}"
 render --dump-conf "$STAGE/machine.conf" "${axis_args[@]}"
 
-cp -p -- "$PROFILE_DIR/printer.cfg" "$STAGE/printer.cfg"
-extract_autosave() {
-  local source="$1" target="$2"
-  [[ -f "$source" ]] || return 1
-  awk '/^#\*# <.*SAVE_CONFIG/ {found=1} found {print}' "$source" > "$target"
-  [[ -s "$target" ]]
-}
-if ((${#AXES[@]} == 0)) && extract_autosave "$DEST/printer.cfg" "$STAGE/.autosave"; then
-  printf '\n' >> "$STAGE/printer.cfg"
-  cat "$STAGE/.autosave" >> "$STAGE/printer.cfg"
-  rm -f -- "$STAGE/.autosave"
+if ((${#AXES[@]} == 0)); then
+  "$PYTHON_BIN" "$SCRIPT_DIR/merge_printer_cfg.py" \
+    --head "$PROFILE_DIR/printer.cfg" \
+    --live "$DEST/printer.cfg" \
+    --output "$STAGE/printer.cfg" >/dev/null
+else
+  cp -p -- "$PROFILE_DIR/printer.cfg" "$STAGE/printer.cfg"
 fi
 
 if ((${#AXES[@]} > 0)); then
@@ -333,7 +337,7 @@ backup_path() {
 copied=0
 seeded=0
 seed_skipped=0
-migrated=0
+printer_updated=0
 backed_up=0
 pruned=0
 
@@ -366,10 +370,8 @@ else
   done
 fi
 
-is_seed_manifest() {
-  grep -q '^\[include[[:space:]]\+profile\.cfg\]' "$1" 2>/dev/null
-}
-
+# printer.cfg: replace the managed head, keep the SAVE_CONFIG block.
+printer_updated=0
 if [[ ! -e "$DEST/printer.cfg" ]]; then
   if (( DRY_RUN )); then
     printf 'would seed: printer.cfg\n'
@@ -378,31 +380,26 @@ if [[ ! -e "$DEST/printer.cfg" ]]; then
     printf 'seeded: printer.cfg\n'
   fi
   seeded=$((seeded + 1))
-elif ! is_seed_manifest "$DEST/printer.cfg"; then
-  # One-time migration from the 1.1.0 manifest (printer.cfg used to be managed).
-  # The old file is backed up when -b is used; an existing SAVE_CONFIG block is
-  # carried into the new seed so calibrated values are not lost.
-  if (( DRY_RUN )); then
-    printf 'would migrate: printer.cfg (old manifest -> seed)\n'
+else
+  merged_printer="$(mktemp "${TMPDIR:-/tmp}/vorons-printer.XXXXXX")"
+  "$PYTHON_BIN" "$SCRIPT_DIR/merge_printer_cfg.py" \
+    --head "$PROFILE_DIR/printer.cfg" \
+    --live "$DEST/printer.cfg" \
+    --output "$merged_printer" >/dev/null
+  if cmp -s -- "$merged_printer" "$DEST/printer.cfg"; then
+    printf 'unchanged: printer.cfg (head matches the profile, SAVE_CONFIG preserved)\n'
+    seed_skipped=$((seed_skipped + 1))
+    rm -f -- "$merged_printer"
+  elif (( DRY_RUN )); then
+    printf 'would update: printer.cfg (head from the profile, SAVE_CONFIG preserved)\n'
+    printer_updated=$((printer_updated + 1))
+    rm -f -- "$merged_printer"
   else
     backup_path printer.cfg
-    new_printer="$DEST/.printer.cfg.new.$$"
-    autosave="$DEST/.printer.cfg.autosave.$$"
-    cp -p -- "$PROFILE_DIR/printer.cfg" "$new_printer"
-    if extract_autosave "$DEST/printer.cfg" "$autosave"; then
-      printf '\n' >> "$new_printer"
-      cat "$autosave" >> "$new_printer"
-      rm -f -- "$autosave"
-      printf 'migrated: printer.cfg to seed (SAVE_CONFIG block preserved)\n'
-    else
-      printf 'migrated: printer.cfg to seed (old manifest kept in backup)\n'
-    fi
-    mv -f -- "$new_printer" "$DEST/printer.cfg"
+    mv -f -- "$merged_printer" "$DEST/printer.cfg"
+    printf 'updated: printer.cfg (head from the profile, SAVE_CONFIG preserved)\n'
+    printer_updated=$((printer_updated + 1))
   fi
-  migrated=$((migrated + 1))
-else
-  seed_skipped=$((seed_skipped + 1))
-  printf 'kept seed (exists): printer.cfg\n'
 fi
 
 for seed in KlipperScreen.conf crowsnest.conf sonar.conf telegram.conf; do
@@ -451,11 +448,11 @@ fi
 
 # --- 7. summary ---------------------------------------------------------------
 if (( DRY_RUN )); then
-  printf 'Dry run for profile %s: %d managed item(s) would be copied, %d seed file(s) would be created, %d printer.cfg migration(s), %d seed file(s) already exist, %d legacy item(s) would be pruned.\n' \
-    "$PROFILE" "$copied" "$seeded" "$migrated" "$seed_skipped" "$pruned"
+  printf 'Dry run for profile %s: %d managed item(s) would be copied, %d printer.cfg head update(s), %d seed file(s) would be created, %d file(s) already current, %d legacy item(s) would be pruned.\n' \
+    "$PROFILE" "$copied" "$printer_updated" "$seeded" "$seed_skipped" "$pruned"
 else
-  printf 'Done: profile %s, %d managed item(s) copied, %d seed file(s) created, %d printer.cfg migration(s), %d seed file(s) left untouched in %s' \
-    "$PROFILE" "$copied" "$seeded" "$migrated" "$seed_skipped" "$DEST"
+  printf 'Done: profile %s, %d managed item(s) copied, %d printer.cfg head update(s), %d seed file(s) created, %d file(s) already current in %s' \
+    "$PROFILE" "$copied" "$printer_updated" "$seeded" "$seed_skipped" "$DEST"
   if (( pruned > 0 )); then
     printf ', %d legacy item(s) pruned' "$pruned"
   fi
