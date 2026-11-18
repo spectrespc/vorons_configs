@@ -123,6 +123,23 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** В гибридном Z профиля `v24-350` значение `[stepper_z]
+  position_endstop` перенесено из `machine-extras.cfg` в seed-файл
+  `printer.cfg`: это индивидуальная настройка, и теперь её штатно сохраняет
+  `Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG` (в main-файле строка-плейсхолдер
+  комментируется, значение уходит в autosave). Включаемый файл для
+  `SAVE_CONFIG` не годится — Klipper падает с `... conflicts with included
+  value`. `check_config.py` считает `printer.cfg` слоем-оверрайдом, поэтому
+  повторное открытие `[stepper_z]` больше не даёт лишнего WARNING.
+  **EN:** For the `v24-350` hybrid Z the `[stepper_z] position_endstop` value
+  moved from `machine-extras.cfg` into the seed `printer.cfg`: it is a
+  per-machine setting, and `Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG` now persists it
+  as intended (the placeholder line in the main file is commented out and the
+  value lands in the autosave). An included file cannot be used for that —
+  Klipper fails with `... conflicts with included value`. `check_config.py`
+  treats `printer.cfg` as an override layer, so reopening `[stepper_z]` no
+  longer raises a spurious WARNING.
+
 - **RU:** На v24 от 250 мм Z переведён на `17HS19-2004S1` (2.0 A peak →
   1.4142 A RMS, `HSTRT/HEND = 0/0`, `TBL=0`): добавлен модуль
   `4z-tmc2209-17hs19-2004s1.cfg`, профиль `v24-350` переключён на него, а

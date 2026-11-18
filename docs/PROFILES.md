@@ -102,18 +102,27 @@ Z-модули: пара Z задаётся только ключами проф
 - **Гибрид: Z по концевику, QGL/bed_mesh по eddy.** `QUAD_GANTRY_LEVEL`
   в Klipper работает только через объект `probe`, поэтому выровнять портал
   концевиком нельзя. Если у машины с `eddy`/`eddy_f` Z паркуется аппаратным
-  концевиком, профиль задаёт его в `machine-extras.cfg` (managed-слой,
-  `[stepper_z]` там уже переопределён):
+  концевиком, профиль задаёт `endstop_pin` в `machine-extras.cfg`
+  (managed-слой, `[stepper_z]` там уже переопределён), а `position_endstop` —
+  в seed-файле `printer.cfg` этого профиля:
 
   ```ini
+  # machine-extras.cfg
   [stepper_z]
   endstop_pin: !SENS_2
-  position_endstop: 0.400 # калибруется Z_ENDSTOP_CALIBRATE
+
+  # printer.cfg — плейсхолдер, калибруется Z_ENDSTOP_CALIBRATE + SAVE_CONFIG
+  [stepper_z]
+  position_endstop: 0.400
   ```
 
   `position_endstop` обязателен: Klipper принимает его отсутствие только при
-  `probe:z_virtual_endstop`. При этом eddy-фича остаётся включённой: `G28 Z`
-  идёт по концевику, `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` — по щупу.
+  `probe:z_virtual_endstop`. В `printer.cfg` он лежит потому, что это
+  индивидуальная настройка, которую должен сохранять `SAVE_CONFIG`:
+  для опции из включаемого файла Klipper падает с `... conflicts with included
+  value`, а в главном файле строка комментируется и значение уходит в
+  autosave. При этом eddy-фича остаётся включённой: `G28 Z` идёт по концевику,
+  `QUAD_GANTRY_LEVEL` и `BED_MESH_CALIBRATE` — по щупу.
   `check_config.py` требует `position_endstop` для любого не-`probe:`
   `endstop_pin` и запрещает `[probe]` вместе с `[probe_eddy_current]`.
 - **`extruder_motor` и составной `xy_driver` — устаревшие.** Схема v1 писала

@@ -275,13 +275,18 @@ features=...,eddy_f
 паркуется по концевику M3-STOP (`SENS_2`), а `QUAD_GANTRY_LEVEL` и
 `BED_MESH_CALIBRATE` пробируют eddy-щупом.
 
-Рецепт — в `machine-extras.cfg` профиля (`[stepper_z]` там уже переопределён
-пинами Z-моторов, так что это разрешённый managed-слой):
+Рецепт — `endstop_pin` в `machine-extras.cfg` профиля (`[stepper_z]` там уже
+переопределён пинами Z-моторов), а сам `position_endstop` — в `printer.cfg`
+этого профиля (seed, машинный файл):
 
 ```ini
+# machine-extras.cfg
 [stepper_z]
 endstop_pin: !SENS_2
-position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
+
+# printer.cfg (seed) — плейсхолдер до калибровки
+[stepper_z]
+position_endstop: 0.400
 ```
 
 `position_endstop` обязателен: Klipper принимает его отсутствие только при
@@ -289,18 +294,27 @@ position_endstop: 0.400 # плейсхолдер до Z_ENDSTOP_CALIBRATE
 в eddy-модуле остаётся страховкой пробирования (номинальный зазор
 сопло–стол, на котором попытка останавливается).
 
+Почему значение живёт в `printer.cfg`, а не в `machine-extras.cfg`: оно
+индивидуально для машины, и его должен уметь записывать `SAVE_CONFIG`.
+Klipper не сохраняет опцию, которая уже задана во включаемом файле
+(`SAVE_CONFIG section 'stepper_z' option 'position_endstop' conflicts with
+included value`), а `printer.cfg` — главный файл: при `SAVE_CONFIG` строка
+плейсхолдера комментируется, а калиброванное значение уходит в autosave-блок
+в конце файла.
+
 Калибровок две:
 
 1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — таблица `calibrate`
    (частота по высоте); её сохраняет `SAVE_CONFIG`, и живёт она только в
    autosave стенда (`printer.cfg`), в git не попадает;
-2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика. Это машинный факт, и
-   он вписывается в `machine-extras.cfg`: `SAVE_CONFIG` не сохраняет опцию,
-   которая уже задана во включаемом файле, и падает с `SAVE_CONFIG section
-   'stepper_z' option 'position_endstop' conflicts with included value`.
-   Значение берут из вывода команды (или из
-   `configfile.save_config_pending_items`), вписывают в `machine-extras.cfg`
-   профиля и деплоят.
+2. `Z_ENDSTOP_CALIBRATE` — `position_endstop` концевика, затем `SAVE_CONFIG`:
+   значение комментарием заменяет плейсхолдер в `printer.cfg` и попадает в
+   autosave. В git калиброванное значение не уходит.
+
+`printer.cfg` — seed: `deploy_configs.sh` создаёт его только на новой машине и
+никогда не перезаписывает. Если файл пересоздан, Klipper поднимется на
+плейсхолдере `0.400`, и калибровку концевика нужно выполнить заново до первой
+печати.
 
 Калибровать eddy нужно с `ACCEPT` на 0.3–0.5 мм выше соприкосновения сопла:
 если катушка стоит низко над соплом (≈1 мм), точка контакта попадает в
@@ -325,9 +339,10 @@ Z=0 по бумаге, после чего расхождение `PROBE` с н�
 неверна.
 
 В коммитнутом профиле `v24-350` гибрид уже включён (`features=...,eddy_f`,
-override — в его `machine-extras.cfg`); до калибровки на стенде
-`position_endstop: 0.400` — плейсхолдер. Требования те же, что у
-обычного `eddy_f`: свежий Klipper с `descend_z` и шлейф EDDY-F, подключаемый
+override — в его `machine-extras.cfg`), а `position_endstop` в его
+`printer.cfg` — плейсхолдер `0.400` до калибровки на стенде. Требования те же,
+что у обычного `eddy_f`: свежий Klipper с `descend_z` и шлейф EDDY-F,
+подключаемый
 только при снятом питании платы.
 
 ### Проверки валидатора
@@ -891,9 +906,10 @@ Klipper, прошивает платы, запускает Klipper и запис
   LDC1612 отвечает по адресу `43`, в логе нет `Registering duplicate object` и
   `Timer too close`). Таблица `calibrate` eddy снята на стенде (диапазон
   ~277 кГц, шум ~1 мкм при 1–3 мм) и сохранена в autosave;
-  `position_endstop` концевика откалиброван и лежит в `machine-extras.cfg`
-  (`-0.030`). Нуль eddy сводится со столом через `PROBE` +
-  `Z_OFFSET_APPLY_PROBE`; прогоны QGL/mesh и первый слой — за оператором.
+  `position_endstop` концевика хранится в `printer.cfg` профиля (плейсхолдер
+  в seed, калиброванное значение — в autosave). Нуль eddy сводится со столом
+  через `PROBE` + `Z_OFFSET_APPLY_PROBE`; прогоны QGL/mesh и первый слой — за
+  оператором.
   `check_config.py` ловит обе типовые ошибки такой сборки — `[probe]` вместе с
   `[probe_eddy_current]` и физический `endstop_pin` у `[stepper_z]` без
   `position_endstop`.
@@ -1186,13 +1202,18 @@ levelled with a hardware switch. The hybrid splits the roles: `G28 Z` parks on
 the M3-STOP switch (`SENS_2`), while `QUAD_GANTRY_LEVEL` and
 `BED_MESH_CALIBRATE` probe with the eddy sensor.
 
-The recipe goes into the profile's `machine-extras.cfg` (`[stepper_z]` already
-reopens there for the Z motor pins, so this is an accepted managed layer):
+The recipe keeps `endstop_pin` in the profile's `machine-extras.cfg`
+(`[stepper_z]` already reopens there for the Z motor pins) and puts
+`position_endstop` into that profile's `printer.cfg` (the machine-local seed):
 
 ```ini
+# machine-extras.cfg
 [stepper_z]
 endstop_pin: !SENS_2
-position_endstop: 0.400 # placeholder until Z_ENDSTOP_CALIBRATE
+
+# printer.cfg (seed), placeholder until calibration
+[stepper_z]
+position_endstop: 0.400
 ```
 
 `position_endstop` is mandatory: Klipper accepts its absence only with
@@ -1200,18 +1221,26 @@ position_endstop: 0.400 # placeholder until Z_ENDSTOP_CALIBRATE
 `descend_z: 2.5` in the eddy module stays the safety stop of probing (the
 nominal nozzle-to-bed gap at which an attempt ends).
 
+The value lives in `printer.cfg` and not in `machine-extras.cfg` because it is
+per-machine and `SAVE_CONFIG` has to be able to persist it: Klipper refuses to
+save an option that an included file already sets (`SAVE_CONFIG section
+'stepper_z' option 'position_endstop' conflicts with included value`), while
+`printer.cfg` is the main file, so a save comments the placeholder out and
+appends the calibrated value to the autosave block.
+
 There are two calibrations:
 
 1. `PROBE_EDDY_CURRENT_CALIBRATE CHIP=fly_eddy_probe` — the `calibrate`
    frequency table; `SAVE_CONFIG` stores it in the bench autosave
    (`printer.cfg`), so it never reaches git;
-2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`. That is a machine
-   fact and goes into `machine-extras.cfg`: `SAVE_CONFIG` refuses to persist an
-   option that an included file already sets and fails with `SAVE_CONFIG
-   section 'stepper_z' option 'position_endstop' conflicts with included
-   value`. Take the value from the command output (or from
-   `configfile.save_config_pending_items`), put it into the profile's
-   `machine-extras.cfg` and deploy.
+2. `Z_ENDSTOP_CALIBRATE` — the switch `position_endstop`, then `SAVE_CONFIG`:
+   the value comments out the placeholder in `printer.cfg` and lands in the
+   autosave, so git never sees a calibrated value.
+
+`printer.cfg` is a seed: `deploy_configs.sh` creates it only on a new machine
+and never overwrites it. If the file is recreated, Klipper boots on the
+`0.400` placeholder and the endstop has to be calibrated again before the first
+print.
 
 Calibrate the eddy with `ACCEPT` 0.3-0.5 mm above nozzle contact: when the coil
 sits low over the nozzle (about 1 mm), the contact point lands in the flat part
@@ -1803,8 +1832,9 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   the LDC1612 answers at address `43`, and the log has no
   `Registering duplicate object` or `Timer too close`). The eddy `calibrate`
   table is measured on the bench (~277 kHz span, ~1 um of noise at 1-3 mm) and
-  stored in the autosave; the switch `position_endstop` is calibrated and lives
-  in `machine-extras.cfg` (`-0.030`). The eddy zero is matched to the bed with
+  stored in the autosave; the switch `position_endstop` lives in the profile's
+  `printer.cfg` (placeholder in the seed, calibrated value in the autosave).
+  The eddy zero is matched to the bed with
   `PROBE` + `Z_OFFSET_APPLY_PROBE`; the QGL/mesh runs and the first layer are
   still with the operator. `check_config.py` now
   catches the two typical mistakes of such a build: `[probe]` together with

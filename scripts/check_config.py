@@ -78,6 +78,10 @@ OVERRIDE_FILES = (
     "anchors.cfg",
     "machine-extras.cfg",
     "mini12864-swspi.cfg",
+    # The seed printer.cfg is the machine-local layer on top of the generated
+    # profile: it carries per-machine sections such as [stepper_z]
+    # position_endstop, which must live outside the includes for SAVE_CONFIG.
+    "printer.cfg",
 )
 
 # Options whose value names an MCU (or a board_pins alias that maps to one).
