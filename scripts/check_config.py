@@ -17,6 +17,7 @@ Usage:
   check_config.py --merged DIR       dump the merged config to stdout
   check_config.py --machine DIR      validate one printers/<id> profile
   check_config.py --stale-check      verify committed profile.cfg files
+  check_config.py --jinja-lint       parse every [gcode_macro] body with Jinja
 
 Exit status: 1 if at least one error was found, otherwise 0.
 
@@ -201,6 +202,81 @@ def parse_points(value: str) -> list[tuple[float, float]]:
     if len(numbers) % 2:
         raise ValueError("odd number of coordinates")
     return [(numbers[i], numbers[i + 1]) for i in range(0, len(numbers), 2)]
+
+
+# --- Jinja macro lint ------------------------------------------------------
+
+
+def gcode_macro_bodies(text: str) -> dict[str, str]:
+    r"""Return the ``gcode:`` body of every ``[gcode_macro ...]`` in *text*.
+
+    The reader mirrors Klipper: everything from the first ``#`` of a line is
+    dropped before the template is built, so commented-out commands and
+    trailing notes never reach Jinja.
+
+    >>> bodies = gcode_macro_bodies(
+    ...     "[gcode_macro A]\n"
+    ...     "gcode:\n"
+    ...     "    {% if params %}  # note\n"
+    ...     "        M117 {params.X}\n"
+    ...     "    {% endif %}\n")
+    >>> sorted(bodies)
+    ['gcode_macro A']
+    >>> bodies["gcode_macro A"].split()[:3]
+    ['{%', 'if', 'params']
+    """
+    stripped = "\n".join(line.split("#", 1)[0] for line in text.split("\n"))
+    parser = configparser.RawConfigParser(
+        strict=False, inline_comment_prefixes=(";", "#")
+    )
+    parser.read_string(stripped)
+    bodies = {}
+    for section in parser.sections():
+        if (
+            section.lower().startswith("gcode_macro ")
+            and parser.has_option(section, "gcode")
+        ):
+            bodies[section] = parser.get(section, "gcode")
+    return bodies
+
+
+def jinja_lint_macros(paths: list[str]) -> int:
+    """Parse every macro body with the delimiters of klippy ``gcode_macro``."""
+    try:
+        import jinja2  # noqa: PLC0415 - optional dependency
+    except ImportError:
+        print(
+            "ERROR: --jinja-lint needs the jinja2 module"
+            " (try ~/klippy-env/bin/python)",
+            file=sys.stderr,
+        )
+        return 1
+    # Same delimiters as PrinterGCodeMacro: { } is a print statement.
+    env = jinja2.Environment("{%", "%}", "{", "}")
+    failed = 0
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read().replace("\r\n", "\n")
+        except OSError as exc:
+            print("ERROR: %s: %s" % (path, exc), file=sys.stderr)
+            failed += 1
+            continue
+        for section, body in gcode_macro_bodies(text).items():
+            try:
+                env.from_string(body)
+            except jinja2.exceptions.TemplateSyntaxError as exc:
+                lines = body.splitlines()
+                source = lines[exc.lineno - 1] if 0 < exc.lineno <= len(lines) else ""
+                print(
+                    "ERROR: %s [%s] template line %s: %s # %s"
+                    % (path, section, exc.lineno, exc.message, source.strip()),
+                    file=sys.stderr,
+                )
+                failed += 1
+    if not failed:
+        print("OK: %d macro files parsed" % len(paths))
+    return 1 if failed else 0
 
 
 # --- SpreadCycle invariant -------------------------------------------------
@@ -1214,8 +1290,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="compare every committed profile.cfg with machine.conf",
     )
+    parser.add_argument(
+        "--jinja-lint",
+        action="store_true",
+        help="parse every [gcode_macro] template with Klipper's Jinja"
+        " delimiters (needs jinja2)",
+    )
     args = parser.parse_args(argv)
-    if not args.config_dir and not args.merged and not args.machine and not args.stale_check:
+    if (
+        not args.config_dir
+        and not args.merged
+        and not args.machine
+        and not args.stale_check
+        and not args.jinja_lint
+    ):
         args.config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return args
 
@@ -1320,6 +1408,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.stale_check:
         return stale_check(args.machine)
+
+    if args.jinja_lint:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        paths = sorted(
+            glob.glob(os.path.join(repo_root, "std.macros", "*.cfg"))
+            + glob.glob(os.path.join(repo_root, "printers", "*", "macros.cfg"))
+        )
+        if not paths:
+            print(
+                "ERROR: no macro files found under %s" % repo_root,
+                file=sys.stderr,
+            )
+            return 1
+        return jinja_lint_macros(paths)
 
     if args.machine:
         profile_dir = os.path.abspath(args.machine)
