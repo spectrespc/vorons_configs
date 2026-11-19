@@ -47,6 +47,11 @@ Managed (always overwritten):
 Seed (copied only when missing in DEST):
   KlipperScreen.conf, crowsnest.conf, sonar.conf, telegram.conf
 
+After a real deploy the script records the profile id in
+DEST/.deployed_profile (read by scripts/moonraker_update.sh) and ensures the
+canonical [update_manager vorons_configs] entry in DEST/moonraker.conf through
+scripts/lib/moonraker_conf.py. Neither step runs with --check or --dry-run.
+
 printer.cfg is partially managed: on every deploy everything above the
   #*# <---------------------- SAVE_CONFIG ---------------------->
 marker is replaced from printers/<profile>/printer.cfg, and the marker with the
@@ -418,6 +423,27 @@ for seed in KlipperScreen.conf crowsnest.conf sonar.conf telegram.conf; do
   seeded=$((seeded + 1))
 done
 
+# --- 5b. deploy state and moonraker.conf ensure -------------------------------
+ensure_changed=0
+conf_helper="$SCRIPT_DIR/lib/moonraker_conf.py"
+[[ -f "$conf_helper" ]] || {
+  echo "ERROR: missing $conf_helper; update the repository checkout." >&2
+  exit 1
+}
+
+if (( DRY_RUN )); then
+  printf 'would write: .deployed_profile (%s)\n' "$PROFILE"
+  printf 'would ensure update_manager entry: moonraker.conf\n'
+else
+  printf '%s\n' "$PROFILE" > "$DEST/.deployed_profile"
+  printf 'wrote: .deployed_profile (%s)\n' "$PROFILE"
+  ensure_out="$("$PYTHON_BIN" "$conf_helper" ensure --config "$DEST/moonraker.conf")"
+  printf '%s\n' "$ensure_out"
+  case "$ensure_out" in
+    updated:*) ensure_changed=1 ;;
+  esac
+fi
+
 # --- 6. prune legacy paths ----------------------------------------------------
 if (( PRUNE )); then
   for rel in std.configs/gantry std.configs/pinout std.configs/tc.ext printers; do
@@ -448,7 +474,7 @@ fi
 
 # --- 7. summary ---------------------------------------------------------------
 if (( DRY_RUN )); then
-  printf 'Dry run for profile %s: %d managed item(s) would be copied, %d printer.cfg head update(s), %d seed file(s) would be created, %d file(s) already current, %d legacy item(s) would be pruned.\n' \
+  printf 'Dry run for profile %s: %d managed item(s) would be copied, %d printer.cfg head update(s), %d seed file(s) would be created, %d file(s) already current, %d legacy item(s) would be pruned; would write .deployed_profile and ensure the update_manager entry.\n' \
     "$PROFILE" "$copied" "$printer_updated" "$seeded" "$seed_skipped" "$pruned"
 else
   printf 'Done: profile %s, %d managed item(s) copied, %d printer.cfg head update(s), %d seed file(s) created, %d file(s) already current in %s' \
@@ -458,6 +484,12 @@ else
   fi
   if (( backed_up > 0 )); then
     printf ' (backed up %d item(s) to %s)' "$backed_up" "$backup_dir"
+  fi
+  printf ', .deployed_profile written'
+  if (( ensure_changed )); then
+    printf ', update_manager entry updated (restart moonraker to activate)'
+  else
+    printf ', update_manager entry unchanged'
   fi
   printf '.\n'
 fi
