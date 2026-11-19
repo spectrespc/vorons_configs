@@ -30,7 +30,9 @@ printers/<id>/
 6. подсистемы (fans/display/buttons), `probe.cfg` (кроме eddy-фич), стол,
    экструдер;
 7. фичи (belay, btt_sfs, runout, extra_extruder, host, y_frame, eddy, eddy_f);
-8. `std.macros`, `anchors.cfg`, `machine-extras.cfg`, для v24 — `homing.cfg`.
+8. `std.macros`, `anchors.cfg`, `machine-extras.cfg`, для v24 —
+   `homing.cfg` (температурный guard сопла и двухпроходная обёртка
+   `QUAD_GANTRY_LEVEL`: грубый descend → контрольный `PROBE` → точный scan).
 
 Модули `mechanics/trident.cfg` и `mechanics/v24.cfg` больше не включают TMC
 Z-модули: пара Z задаётся только ключами профиля. Klipper сливает одинаковые
