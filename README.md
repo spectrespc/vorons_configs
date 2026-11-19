@@ -152,6 +152,24 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 (подъём 30 мм, зонд в центре стола), а `QUAD_GANTRY_LEVEL_BASE` — через модуль
 `[quad_gantry_level]`.
 
+Вызов `QUAD_GANTRY_LEVEL` без параметров на eddy-машине — два прохода. Сначала
+грубый descend с `RETRY_TOLERANCE=0.25` и `RETRIES=2`: в этом режиме
+пробирование останавливается на `descend_z` выше стола, поэтому просевший
+задний угол портала не вдавливается в стол. Затем `_QGL_ZERO_PROBE` измеряет
+абсолютную высоту стола командой `PROBE` в точке `zero_reference_position`
+(центр осей, если сетки нет), а `_QGL_FINE` запускает точный `METHOD=scan` с
+`HORIZONTAL_MOVE_Z = измеренный Z + descend_z`: физический зазор всегда равен
+`descend_z`, каким бы ни был абсолютный нуль. Если контрольный замер отличается
+от нуля больше чем на `MAX_ZERO_DEV` (0.5 мм), макрос прерывается **до**
+scan-прохода с требованием перекалибровки (`Z_ENDSTOP_CALIBRATE` +
+`Z_OFFSET_APPLY_PROBE`); расхождение больше 0.05 мм печатается предупреждением.
+Проходов именно два отдельных макроса, потому что шаблон `gcode_macro`
+рендерится целиком до выполнения G-code и не может использовать результат
+`PROBE`, полученный в том же теле. Точный проход требует eddy-ветку
+(`eddy_f`/`eddy`); на физическом `[probe]` остаётся один descend, а вызов с
+любым параметром (например, `QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`) —
+один проход, как раньше.
+
 Ревизии M8P выбираются осью `board`: `manta-m8p` — V2.0 (STM32H723, 25 МГц,
 USB-CAN-мост), `manta-m8p-v1.0` и `manta-m8p-v1.1` — STM32G0B1, 8 МГц,
 8 КиБ загрузчик. Все три значения используют общие `fans/manta-m8p/`,
@@ -327,12 +345,17 @@ included value`), а `printer.cfg` — главный файл: при `SAVE_CON
 Z=0 по бумаге, после чего расхождение `PROBE` с нулём убирают
 `Z_OFFSET_APPLY_PROBE`.
 
-Для `scan`/`rapid_scan` высоту сканирования передают параметром команды
-`HORIZONTAL_MOVE_Z=<descend_z>` (2.5): таблица `calibrate` покрывает только
-свой диапазон, а штатные 5 мм у `bed_mesh` и 10 мм у QGL выходят за него —
-`probe_eddy_current sensor not in valid range`. Понижать `horizontal_move_z`
-в секциях до 2.5 нельзя: в режиме `automatic` (descend) пробирование
-начинается с этой высоты и сразу упрётся в `descend_z`.
+Для scan-прохода QGL высоту сканирования вычисляет сам макрос (см. раздел про
+`homing.cfg` выше): она равна `измеренный Z + descend_z` из контрольного
+`PROBE`. Для `BED_MESH_CALIBRATE METHOD=scan` параметр по-прежнему передают
+вручную — `HORIZONTAL_MOVE_Z=<descend_z>` (2.5): таблица `calibrate` покрывает
+только свой диапазон, а штатные 5 мм у `bed_mesh` и 10 мм у QGL выходят за
+него — `probe_eddy_current sensor not in valid range`. Понижать
+`horizontal_move_z` в секциях до 2.5 нельзя: в режиме `automatic` (descend)
+пробирование начинается с этой высоты и сразу упрётся в `descend_z`.
+`rapid_scan` для QGL не рекомендуется: он менее точен, а ошибка датчика в
+`scan`/`rapid_scan` поднимается только после прохода всех четырёх точек —
+именно поэтому перед точным проходом и стоит грубый descend.
 
 Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
 должна дать ≈ 0 (± 0.02 мм); расхождение означает, что одна из калибровок
@@ -372,6 +395,11 @@ override — в его `machine-extras.cfg`), а `position_endstop` в его
   работает в SpreadCycle по умолчанию, но парковый инвариант требует явный `0`.
   Аудит обходит весь `std.configs/**` и `printers/*/local/**`, поэтому
   недосягаемый из `machine.conf` `boards/fly-sb2040.cfg` тоже проверяется.
+- **ERROR** — `--jinja-lint`: тело любого `[gcode_macro]` из `std.macros/` и
+  `printers/*/macros.cfg` не разбирается Jinja с разделителями Klipper
+  (`{% %}` для блоков, `{ }` для вывода), то есть Klipper не загрузит конфиг.
+  Нужен `jinja2` — он есть в `~/klippy-env/bin/python`; системный `python3`
+  без модуля выдаёт понятную ошибку вместо тихого пропуска.
 
 ### Раскладка репозитория
 
@@ -433,6 +461,14 @@ Git-репозиторий живёт только в `~/vorons_configs`. Жив
   которую определяет и autosave, комментируется: иначе Klipper отдал бы
   приоритет голове и калибровка потерялась бы. При `-b` старая версия уходит в
   `DEST/.backup/<ts>/`.
+- **`.deployed_profile`** — dot-файл состояния в `DEST`: id последнего
+  фактически развёрнутого профиля. Его читает `scripts/moonraker_update.sh`
+  после обновления репозитория. После записи файлов deploy идемпотентно
+  приводит секцию `[update_manager vorons_configs]` в `moonraker.conf` к
+  канонической (`scripts/lib/moonraker_conf.py`); под prune dot-файлы не
+  попадают и в `--check` не участвуют. Рядом лежит `.deployed_commit` —
+  commit, который хук уже задеплоил и после которого перезапустил Klipper
+  (нужен таймеру, чтобы не повторять работу).
 - `std.compil.configs/` в живой каталог не выкладывается: это исходники прошивок.
 - `--prune` (по умолчанию) удаляет только известные устаревшие пути:
   `std.configs/{gantry,pinout,tc.ext}/`, корневой `printers/` (осколок 1.1.0),
@@ -498,13 +534,16 @@ Klipper и настройка CAN-хоста»).
 |---|---|
 | `scripts/deploy_configs.sh -p <профиль>` | деплой; `--render`, `--check`, `--matrix` (full/lite, по платам), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <профиль> [--write]` | рендер `profile.cfg` из `machine.conf` |
-| `scripts/check_config.py` | офлайн-парсер: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
+| `scripts/check_config.py` | офлайн-парсер: `--config-dir`, `--merged`, `--machine`, `--stale-check`, `--jinja-lint` (нужен `jinja2`) |
 | `scripts/collect_local.sh -p <профиль>` | `std.config.local/*.cfg` → профиль + autosave-снимок |
 | `scripts/new_machine.sh` | мастер заведения профиля (фичи, UUID-шаблон) |
 | `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | сборка `klipper.bin`, `katapult.bin` или `klipper.elf` |
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | прошивка контроллера |
 | `scripts/update_firmware.sh [-p профиль] [--dry-run] [--auto]` | пересборка и прошивка всех MCU после обновления Klipper |
 | `scripts/install_update_hook.sh [--profile профиль] [--dry-run]` | установка systemd path/timer хука (нужен sudo) |
+| `scripts/moonraker_update.sh [-p профиль] [-d DEST] [-n] [-a]` | деплой после обновления репозитория: профиль, ensure секции, `--auto` — stamp коммита и перезапуск Klipper |
+| `scripts/install_config_update_hook.sh [--dry-run] [--uninstall]` | systemd path/timer, который запускает `moonraker_update.sh --auto` (нужен sudo) |
+| `scripts/lib/moonraker_conf.py ensure --config <файл>` | идемпотентная каноническая секция `[update_manager vorons_configs]`; `selftest` |
 | `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | расчёт параметров TMC по даташиту мотора: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
 | `scripts/tmc_tune.py --profile printers/<id> --run` | подбор `max_velocity`/`max_accel` через `TEST_SPEED`; `--z-test` — подбор `max_z_velocity`/`max_z_accel` через `TEST_SPEED_Z`: `--dry-plan`, `--apply`, `--heat`, `--z-offline-result`, `--selftest` |
 | `scripts/bringup.sh -p <профиль>` | первичная настройка: `deploy → tmc → motion → z-motion → pid-e → pid-b → done`, resume через `--from`, проверка плана `--dry-run` |
@@ -793,6 +832,55 @@ Klipper, прошивает платы, запускает Klipper и запис
 или ROM DFU. Katapult, настроенный только на CAN, после `-r` заберёт `can0` с
 собой, и плату придётся вывести из загрузчика вручную.
 
+### Автообновление конфигов через Moonraker
+
+`[update_manager vorons_configs]` в `moonraker.conf` только тянет этот
+репозиторий: Moonraker не исполняет `install_script` (эта устаревшая опция
+лишь читается на `PKGLIST`), поэтому деплой запускает отдельный systemd-хук.
+`scripts/install_config_update_hook.sh` ставит `klipper-configs-deploy.path`
+(следит за `.git/HEAD`, `.git/FETCH_HEAD` и `.git/refs/heads` клона) и
+`klipper-configs-deploy.timer` (повтор каждые 10 минут); оба запускают
+`scripts/moonraker_update.sh --auto` от пользователя принтера без sudo.
+
+Хук:
+
+1. определяет профиль — по маркеру `~/printer_data/config/.deployed_profile`,
+   который пишет `deploy_configs.sh` при фактическом деплое; если маркера нет,
+   побайтно сравнивает живой `machine.conf` с рендером каждого профиля
+   (`render_profile.py --dump-conf`, именно его пишет deploy) и при отсутствии
+   или неоднозначности совпадений завершается ошибкой;
+2. в режиме `--auto` пропускает работу, если `DEST/.deployed_commit` уже равен
+   текущему `HEAD` (повторный запуск таймера ничего не делает);
+3. деплоит профиль (`deploy_configs.sh -p <id> -b`); встроенный гейт не даёт
+   писать во время печати;
+4. идемпотентно приводит секцию `[update_manager vorons_configs]` в живом
+   `moonraker.conf` к канонической (`scripts/lib/moonraker_conf.py`) и
+   предупреждает, если её пришлось изменить: перезапуск Moonraker остаётся
+   ручным, иначе хук убил бы сам себя;
+5. перезапускает Klipper через API Moonraker (`managed_services` в секции не
+   используется: Moonraker перезапустил бы Klipper до того, как деплой
+   закончится) и записывает короткий commit в `DEST/.deployed_commit`;
+6. печатает сводку (профиль, короткий commit, результат).
+
+Любая ошибка деплоя или перезапуска завершает хук с ненулевым кодом, и таймер
+повторяет попытку; до успешного перезапуска stamp не обновляется, поэтому
+Klipper не останется со старым конфигом. Ручной запуск без `--auto` деплоит и
+пишет stamp, но Klipper не перезапускает (хук печатает напоминание).
+
+Bootstrap (один раз на машине):
+
+```bash
+sudo scripts/install_config_update_hook.sh       # path + timer, нужен sudo
+./scripts/deploy_configs.sh -p <профиль> -b      # маркер + moonraker.conf
+sudo systemctl restart moonraker                 # один раз: перечитать update-секцию
+```
+
+Дальше — «Update» в Mainsail или `POST /machine/update/full`: Moonraker делает
+pull, path-юнит замечает новый коммит, хук деплоит конфиги и перезапускает
+Klipper. Грязный клон (`git status` не пуст) Moonraker обновлять откажется, и
+автодеплой не отработает: это штатное поведение `update_manager`, правки нужно
+закоммитить или отбросить.
+
 ### Секреты
 
 - Не коммитить реальный `bot_token`/`chat_id` в `telegram.conf`: в репозитории заглушка.
@@ -920,6 +1008,17 @@ Klipper, прошивает платы, запускает Klipper и запис
   `check_config.py` ловит обе типовые ошибки такой сборки — `[probe]` вместе с
   `[probe_eddy_current]` и физический `endstop_pin` у `[stepper_z]` без
   `position_endstop`.
+- Голый `QUAD_GANTRY_LEVEL` на eddy-машине теперь двухпроходный (грубый
+  descend + контрольный `PROBE` + точный scan), поэтому стал дольше: это
+  затрагивает `PRINT_START`, `TEST_SPEED` (`std.macros/test_speed.cfg`) и
+  `scripts/tmc_tune.py` — они вызывают команду без параметров. Один проход
+  по-прежнему вызывается любым параметром, например
+  `QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`. На стенде v24-350 (2026-11-19)
+  грубый descend сходится за ~18 с (разброс 0.035 мм), контрольный `PROBE`
+  вместе с точным scan — за ~22 с (0.004 мм при допуске 0.015), явный
+  одиночный проход — за ~14 с. Полный голый вызов там пока упирается в новый
+  guard: нуль стенда не откалиброван, `PROBE` после `G28 Z` даёт ≈ -0.6 мм,
+  поэтому сначала нужны `Z_ENDSTOP_CALIBRATE` и `Z_OFFSET_APPLY_PROBE`.
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
@@ -1085,6 +1184,23 @@ at print temperature. The module is included by `profile.cfg` for the v24
 model; the wrappers rename the commands on `klippy:connect`, so `G28.1` still
 goes through `[safe_z_home]` (30 mm lift, probe at the bed centre) and
 `QUAD_GANTRY_LEVEL_BASE` through the `[quad_gantry_level]` module.
+
+A bare `QUAD_GANTRY_LEVEL` call on an eddy machine runs two passes. First the
+rough descend pass with `RETRY_TOLERANCE=0.25` and `RETRIES=2`: in that mode
+probing stops `descend_z` above the bed, so a sagged rear gantry corner is not
+pushed into it. Then `_QGL_ZERO_PROBE` measures the absolute bed height with
+`PROBE` at the `zero_reference_position` point (the axis centre when there is
+no mesh), and `_QGL_FINE` starts the precise `METHOD=scan` pass with
+`HORIZONTAL_MOVE_Z = measured Z + descend_z`, so the physical gap is always
+`descend_z` whatever the absolute zero is. If the check probe differs from
+zero by more than `MAX_ZERO_DEV` (0.5 mm), the macro aborts **before** the scan
+and asks for recalibration (`Z_ENDSTOP_CALIBRATE` + `Z_OFFSET_APPLY_PROBE`);
+a deviation above 0.05 mm is reported as a warning. The passes are separate
+macros because a `gcode_macro` template is rendered in full before its G-code
+runs and cannot use a `PROBE` result obtained in the same body. The fine pass
+needs an eddy branch (`eddy_f`/`eddy`); a physical `[probe]` keeps the single
+descend pass, and a call with any parameter (for example
+`QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`) stays a single pass as before.
 
 M8P revisions are selected with the `board` axis: `manta-m8p` is V2.0
 (STM32H723, 25 MHz, USB-CAN bridge), while `manta-m8p-v1.0` and
@@ -1259,12 +1375,17 @@ the coil at the recommended 2-3 mm above the nozzle, or calibrate from a raised
 position and set the zero separately: `Z_ENDSTOP_CALIBRATE` defines Z=0 on
 paper, then the `PROBE` difference is removed with `Z_OFFSET_APPLY_PROBE`.
 
-For `scan`/`rapid_scan` pass the scan height as a command parameter,
+For the QGL scan pass the macro derives the scan height itself (see the
+`homing.cfg` section above): it is `measured Z + descend_z` from the check
+`PROBE`. `BED_MESH_CALIBRATE METHOD=scan` still takes the parameter by hand,
 `HORIZONTAL_MOVE_Z=<descend_z>` (2.5): the `calibrate` table covers only its
 own range, and the default 5 mm of `bed_mesh` and 10 mm of QGL fall outside it -
 `probe_eddy_current sensor not in valid range`. Do not lower `horizontal_move_z`
 in the sections to 2.5: in `automatic` (descend) mode probing starts at that
-height and would hit `descend_z` immediately.
+height and would hit `descend_z` immediately. `rapid_scan` is not recommended
+for QGL: it is less accurate, and in `scan`/`rapid_scan` a sensor error is
+raised only after all four points have been probed - which is exactly why the
+rough descend pass runs before the fine one.
 
 Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
 at the bed centre must read about 0 (+/- 0.02 mm); a difference means one of
@@ -1304,6 +1425,11 @@ references against the original option text:
   SpreadCycle by default, but the fleet invariant wants an explicit `0`. The
   audit walks all of `std.configs/**` and `printers/*/local/**`, so
   `boards/fly-sb2040.cfg` (unreachable from `machine.conf`) is covered too.
+- **ERROR** — `--jinja-lint`: a `[gcode_macro]` body in `std.macros/` or
+  `printers/*/macros.cfg` does not parse as Jinja with Klipper's delimiters
+  (`{% %}` blocks, `{ }` output), i.e. Klipper would refuse to load the config.
+  Requires `jinja2` (`~/klippy-env/bin/python` has it); a system `python3`
+  without the module reports a clear error instead of skipping silently.
 
 ### Repository layout
 
@@ -1364,6 +1490,14 @@ The git repository lives only in `~/vorons_configs`. The live directory
   that the autosave also defines is commented out: Klipper gives the regular
   config priority, so an active head value would shadow the calibration. With `-b`
   the previous version moves to `DEST/.backup/<ts>/`.
+- **`.deployed_profile`** — a state dotfile in `DEST` with the id of the last
+  profile that was actually deployed. `scripts/moonraker_update.sh` reads it
+  after the repository is updated. After writing the files, the deploy
+  idempotently normalizes the `[update_manager vorons_configs]` entry in
+  `moonraker.conf` (`scripts/lib/moonraker_conf.py`); prune never touches the
+  dotfiles and `--check` does not involve them. Next to it,
+  `.deployed_commit` records the commit the hook already deployed and restarted
+  Klipper for (the timer uses it to skip repeated work).
 - `std.compil.configs/` is never deployed: it holds firmware build configs.
 - `--prune` (default) removes only known legacy paths:
   `std.configs/{gantry,pinout,tc.ext}/`, the root `printers/` leftover from 1.1.0,
@@ -1428,13 +1562,16 @@ first calibration, check the CAN host: `ip -details link show can0` must report
 |---|---|
 | `scripts/deploy_configs.sh -p <profile>` | deploy; `--render`, `--check`, `--matrix` (full/lite, per board), `--axis K=V`, `-n`, `-b`, `-d`, `--no-prune` |
 | `scripts/render_profile.py --machine-dir <profile> [--write]` | render `profile.cfg` from `machine.conf` |
-| `scripts/check_config.py` | offline parser: `--config-dir`, `--merged`, `--machine`, `--stale-check` |
+| `scripts/check_config.py` | offline parser: `--config-dir`, `--merged`, `--machine`, `--stale-check`, `--jinja-lint` (needs `jinja2`) |
 | `scripts/collect_local.sh -p <profile>` | `std.config.local/*.cfg` → profile + autosave snapshot |
 | `scripts/new_machine.sh` | profile creation wizard (features, UUID template) |
 | `scripts/build_mcu.sh -c <config> [--src DIR] [-o out] [--clean] [-j N] [--print-bin]` | build `klipper.bin`, `katapult.bin` or `klipper.elf` |
 | `scripts/flash_mcu.sh [can\|bridge\|query\|serial\|dfu\|linux] ...` | flash one controller |
 | `scripts/update_firmware.sh [-p profile] [--dry-run] [--auto]` | rebuild and flash all MCUs after a Klipper update |
 | `scripts/install_update_hook.sh [--profile profile] [--dry-run]` | install the systemd path/timer hook (needs sudo) |
+| `scripts/moonraker_update.sh [-p profile] [-d DEST] [-n] [-a]` | deploy after a repository update: profile, section ensure; `--auto` adds the commit stamp and the Klipper restart |
+| `scripts/install_config_update_hook.sh [--dry-run] [--uninstall]` | systemd path/timer that runs `moonraker_update.sh --auto` (needs sudo) |
+| `scripts/lib/moonraker_conf.py ensure --config <file>` | idempotent canonical `[update_manager vorons_configs]` entry; `selftest` |
 | `scripts/tmc_calc.py --driver tmc2209\|tmc5160 ...` | TMC settings from a motor datasheet: `--write`, `--update-module`, `--wire-profile`, `--json`, `--selftest` |
 | `scripts/tmc_tune.py --profile printers/<id> --run` | finds `max_velocity`/`max_accel` with `TEST_SPEED`; `--z-test` finds `max_z_velocity`/`max_z_accel` with `TEST_SPEED_Z`: `--dry-plan`, `--apply`, `--heat`, `--z-offline-result`, `--selftest` |
 | `scripts/bringup.sh -p <profile>` | first-run setup: `deploy → tmc → motion → z-motion → pid-e → pid-b → done`, resume with `--from`, plan with `--dry-run` |
@@ -1725,6 +1862,56 @@ Limitation: the main board's bootloader must support USB (Katapult-USB) or ROM
 DFU. A CAN-only Katapult would take `can0` down after `-r` and require manual
 recovery.
 
+### Automatic config updates through Moonraker
+
+`[update_manager vorons_configs]` in `moonraker.conf` only pulls this
+repository: Moonraker never executes `install_script` (the legacy option is
+read for `PKGLIST` only), so a separate systemd hook starts the deploy.
+`scripts/install_config_update_hook.sh` installs
+`klipper-configs-deploy.path` (watches the checkout's `.git/HEAD`,
+`.git/FETCH_HEAD` and `.git/refs/heads`) and `klipper-configs-deploy.timer`
+(retries every 10 minutes); both run `scripts/moonraker_update.sh --auto` as
+the printer user without sudo.
+
+The hook:
+
+1. detects the profile from the `~/printer_data/config/.deployed_profile`
+   marker written by `deploy_configs.sh` on a real deploy; without a marker it
+   compares the live `machine.conf` byte by byte with each profile's render
+   (`render_profile.py --dump-conf`, which is what deploy writes) and fails when
+   there is no match or more than one;
+2. in `--auto` mode it skips the work when `DEST/.deployed_commit` already
+   equals the current `HEAD` (a timer retry becomes a no-op);
+3. deploys the profile (`deploy_configs.sh -p <id> -b`); the built-in gate
+   refuses to write while a print is running;
+4. idempotently normalizes the `[update_manager vorons_configs]` entry in the
+   live `moonraker.conf` (`scripts/lib/moonraker_conf.py`) and warns when it had
+   to change it: restarting Moonraker stays manual, otherwise the hook would
+   kill itself;
+5. restarts Klipper through the Moonraker API (the entry does not use
+   `managed_services`: Moonraker would restart Klipper before the deploy
+   finishes) and writes the short commit to `DEST/.deployed_commit`;
+6. prints a summary (profile, short commit, result).
+
+Any deploy or restart failure exits non-zero and the timer retries; the stamp is
+not updated until the restart succeeds, so Klipper never stays on the old
+config after a successful run. A manual run without `--auto` deploys and stamps
+but does not restart Klipper (the hook prints a reminder).
+
+Bootstrap (once per machine):
+
+```bash
+sudo scripts/install_config_update_hook.sh       # path + timer units (needs sudo)
+./scripts/deploy_configs.sh -p <profile> -b      # marker + moonraker.conf
+sudo systemctl restart moonraker                 # once, to reread the update entry
+```
+
+After that use "Update" in Mainsail or `POST /machine/update/full`: Moonraker
+pulls, the path unit sees the new commit, the hook deploys the configs and
+restarts Klipper. Moonraker refuses to update a dirty clone (non-empty `git status`), so the automatic
+deploy does not run: that is normal `update_manager` behavior, commit or discard
+the changes first.
+
 ### Secrets
 
 - Never commit a real `bot_token`/`chat_id` in `telegram.conf`; the repository keeps a
@@ -1854,6 +2041,17 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   catches the two typical mistakes of such a build: `[probe]` together with
   `[probe_eddy_current]`, and a physical `[stepper_z] endstop_pin` without
   `position_endstop`.
+- A bare `QUAD_GANTRY_LEVEL` on an eddy machine is now two-pass (rough descend
+  + check `PROBE` + fine scan), so it takes longer: this affects `PRINT_START`,
+  `TEST_SPEED` (`std.macros/test_speed.cfg`) and `scripts/tmc_tune.py`, which
+  call the command without parameters. A single pass is still available with
+  any parameter, for example `QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`. On the
+  v24-350 bench (2026-11-19) the rough descend converges in about 18 s (0.035 mm
+  spread) and the check `PROBE` plus the fine scan take about 22 s (0.004 mm at
+  a 0.015 tolerance); an explicit single pass takes about 14 s. The full bare
+  call is still blocked there by the new guard: the bench zero is not
+  calibrated and `PROBE` after `G28 Z` reads about -0.6 mm, so
+  `Z_ENDSTOP_CALIBRATE` and `Z_OFFSET_APPLY_PROBE` must run first.
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.

@@ -122,9 +122,79 @@ Every entry is provided in Russian and English.
   --z-offline-result`) tune the Z limits from each Z motor's own step counter
   and detect skew; `bringup.sh` gained the `z-motion` stage. `check_config.py`
   enforces the SpreadCycle invariant (ERROR for an active
-  `stealthchop_threshold >= 1000`, WARNING for a missing key) across all of
+  `stealthchop_threshold >= 1000`, WARNING for a missing key) across all
   `std.configs/**` and `printers/*/local/**`, and `bringup_tmc.py` refuses a
   StealthChop section instead of silently dropping the registers.
+
+- **RU:** `QUAD_GANTRY_LEVEL` на v24 стал двухпроходным: голый вызов
+  (`PRINT_START`, кнопка, `TEST_SPEED`, `tmc_tune.py`) сначала выравнивает
+  портал грубым descend-проходом (`RETRY_TOLERANCE=0.25`, `RETRIES=2`), затем
+  `_QGL_ZERO_PROBE` измеряет абсолютную высоту стола командой `PROBE` в точке
+  `zero_reference_position`, а `_QGL_FINE` запускает точный `METHOD=scan` с
+  `HORIZONTAL_MOVE_Z = измеренный Z + descend_z`. Это именно два отдельных
+  макроса: шаблон `gcode_macro` рендерится целиком до выполнения G-code и не
+  видит результат `PROBE` из того же тела. Если контрольный замер вышел за
+  `MAX_ZERO_DEV` (0.5 мм), макрос прерывается до scan-прохода с требованием
+  `Z_ENDSTOP_CALIBRATE` + `Z_OFFSET_APPLY_PROBE` (предупреждение — с 0.05 мм).
+  Вызов с любым параметром остаётся одним проходом, на физическом `[probe]`
+  тоже один descend. Отдельный `G1 Z10` до и после контрольного `PROBE`
+  обязателен: с `SAMPLES=1` сопло остаётся на высоте срабатывания.
+  **EN:** `QUAD_GANTRY_LEVEL` on v24 is now two-pass: a bare call
+  (`PRINT_START`, the button, `TEST_SPEED`, `tmc_tune.py`) levels the gantry
+  with a rough descend pass first (`RETRY_TOLERANCE=0.25`, `RETRIES=2`), then
+  `_QGL_ZERO_PROBE` measures the absolute bed height with `PROBE` at the
+  `zero_reference_position` point, and `_QGL_FINE` starts the precise
+  `METHOD=scan` pass with `HORIZONTAL_MOVE_Z = measured Z + descend_z`. They
+  are separate macros because a `gcode_macro` template is rendered in full
+  before its G-code runs and cannot see a `PROBE` result from the same body.
+  If the check probe exceeds `MAX_ZERO_DEV` (0.5 mm), the macro aborts before
+  the scan and asks for `Z_ENDSTOP_CALIBRATE` + `Z_OFFSET_APPLY_PROBE` (a
+  warning starts at 0.05 mm). A call with any parameter stays a single pass,
+  and a physical `[probe]` also keeps the single descend pass. The explicit
+  `G1 Z10` before and after the check `PROBE` is required because with
+  `SAMPLES=1` the nozzle stays at the trigger height.
+
+- **RU:** Автообновление живых конфигов через Moonraker: `update_manager`
+  только тянет репозиторий (Moonraker не исполняет `install_script`), поэтому
+  новый `scripts/install_config_update_hook.sh` ставит systemd path/timer
+  (`klipper-configs-deploy.path/.timer`), который запускает
+  `scripts/moonraker_update.sh --auto` от пользователя принтера. Хук
+  определяет профиль по маркеру `~/printer_data/config/.deployed_profile`
+  (fallback — побайтное сравнение живого `machine.conf` с рендером
+  `render_profile.py --dump-conf` каждого профиля), пропускает работу при
+  совпадении `DEST/.deployed_commit` с `HEAD`, деплоит профиль, идемпотентно
+  приводит `[update_manager vorons_configs]` в живом `moonraker.conf` к
+  канонической записи, перезапускает Klipper через API Moonraker и пишет stamp
+  только после успешного перезапуска; ошибка деплоя оставляет прежние живые
+  конфиги, таймер повторяет попытку. Новый хелпер
+  `scripts/lib/moonraker_conf.py ensure --config FILE` (текстовый upsert, дубли
+  на тот же `path:`/`origin:` схлопываются, комментарии и посторонние секции
+  сохраняются, есть `selftest`) вызывается и из `deploy_configs.sh`, который
+  теперь пишет маркер профиля после фактической записи файлов. Профильные
+  `moonraker.conf` и шаблон `new_machine.sh` получили каноническую секцию без
+  `managed_services`/`install_script`; устаревшие
+  `voron_standart_configs`/`voron_personal_configs` из `v24-350` удалены.
+  **EN:** Live configs now update through Moonraker: `update_manager` only
+  pulls the repository (Moonraker does not execute `install_script`), so the
+  new `scripts/install_config_update_hook.sh` installs systemd path/timer units
+  (`klipper-configs-deploy.path/.timer`) that run
+  `scripts/moonraker_update.sh --auto` as the printer user. The hook detects
+  the profile from the `~/printer_data/config/.deployed_profile` marker
+  (fallback: byte comparison of the live `machine.conf` with each profile's
+  `render_profile.py --dump-conf` output), skips the work when
+  `DEST/.deployed_commit` equals `HEAD`, deploys the profile, idempotently
+  normalizes `[update_manager vorons_configs]` in the live `moonraker.conf`,
+  restarts Klipper through the Moonraker API and writes the stamp only after a
+  successful restart; a deploy failure leaves the previous live configs and the
+  timer retries. The new `scripts/lib/moonraker_conf.py ensure --config FILE`
+  helper (text upsert, duplicates on the same `path:`/`origin:` collapsed,
+  comments and unrelated sections preserved, `selftest` included) is also
+  called by `deploy_configs.sh`, which now writes the profile marker after the
+  actual file writes. The profile `moonraker.conf` files and the
+  `new_machine.sh` template carry the canonical entry without
+  `managed_services`/`install_script`; the legacy
+  `voron_standart_configs`/`voron_personal_configs` entries in `v24-350` are
+  removed.
 
 ### Changed / Изменено
 
@@ -248,6 +318,24 @@ Every entry is provided in Russian and English.
   `v24-350` profiles are migrated to schema v2 and re-rendered. The unused
   `mechanics/tmc/xy-tmc2209-17HM19-1684.cfg` is removed: a pair without
   modules in both board families is no longer valid.
+
+- **RU:** `[quad_gantry_level]` модели v24: `retry_tolerance` 0.0075 → 0.015 и
+  `retries` 5 → 3. Эти значения принадлежат точному scan-проходу обёртки
+  `QUAD_GANTRY_LEVEL`: точный scan на стенде сходится до 0.004 мм, поэтому
+  допуск 0.015 мм достижим, а прежние 7.5 мкм на шумном descend-проходе
+  не сходились за 230–450 с.
+  `horizontal_move_z` (10 мм) и `max_adjust` (10) не изменены — первый
+  остаётся запасом безопасности грубого прохода, второй механизмом коррекции
+  просевшего портала; грубый проход задаёт свои допуски параметрами команды.
+  **EN:** v24 `[quad_gantry_level]`: `retry_tolerance` 0.0075 -> 0.015 and
+  `retries` 5 -> 3. These values belong to the fine scan pass of the
+  `QUAD_GANTRY_LEVEL` wrapper: the bench scan converges to 0.004 mm, so a
+  0.015 mm tolerance is reachable, while the former 7.5 um never converged in
+  the noisy descend pass within 230-450 s.
+  `horizontal_move_z` (10 mm) and `max_adjust` (10) are unchanged - the first
+  stays the safety reserve of the rough pass, the second the recovery
+  mechanism for a sagged gantry; the rough pass sets its own tolerances on the
+  command line.
 
 ### Fixed / Исправлено
 
