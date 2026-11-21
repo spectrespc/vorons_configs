@@ -146,7 +146,9 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 ждёт `M109`; если цель уже ниже, но сопло горячее 155 °C, команда ждёт
 остывания через `TEMPERATURE_WAIT`. `G28 X Y` и `G28 Y` (в `PRINT_END`,
 `CANCEL_PRINT`) проверку пропускают и не тормозятся. `BED_MESH_CALIBRATE`
-намеренно не обёрнут — сетка снимается на рабочей температуре. Модуль
+обёрнут отдельно (см. «`BED_MESH_CALIBRATE` по умолчанию = scan» ниже), но
+намеренно **не** через этот guard: сетка снимается на рабочей температуре, при
+этом обёртка активируется только на eddy-машинах. Модуль
 подключается в `profile.cfg` для модели v24; обёртки переименовывают команды на
 `klippy:connect`, поэтому `G28.1` по-прежнему идёт через `[safe_z_home]`
 (подъём 30 мм, зонд в центре стола), а `QUAD_GANTRY_LEVEL_BASE` — через модуль
@@ -155,14 +157,17 @@ CS-пином на драйвер; M5P — аппаратный `spi2`. Аппа
 Вызов `QUAD_GANTRY_LEVEL` без параметров на eddy-машине — два прохода. Сначала
 грубый descend с `RETRY_TOLERANCE=0.25` и `RETRIES=2`: в этом режиме
 пробирование останавливается на `descend_z` выше стола, поэтому просевший
-задний угол портала не вдавливается в стол. Затем `_QGL_ZERO_PROBE` измеряет
+задний угол портала не вдавливается в стол. Затем `_ZERO_REF_PROBE` измеряет
 абсолютную высоту стола командой `PROBE` в точке `zero_reference_position`
-(центр осей, если сетки нет), а `_QGL_FINE` запускает точный `METHOD=scan` с
-`HORIZONTAL_MOVE_Z = измеренный Z + descend_z`: физический зазор всегда равен
-`descend_z`, каким бы ни был абсолютный нуль. Если контрольный замер отличается
-от нуля больше чем на `MAX_ZERO_DEV` (0.5 мм), макрос прерывается **до**
-scan-прохода с требованием перекалибровки (`Z_ENDSTOP_CALIBRATE` +
-`Z_OFFSET_APPLY_PROBE`); расхождение больше 0.05 мм печатается предупреждением.
+(центр осей, если сетки нет); сопло встаёт в «точка стола − offset», потому что
+это координаты стола, а не позиция сопла. `_QGL_FINE` запускает точный
+`METHOD=scan` с `HORIZONTAL_MOVE_Z = измеренный Z + descend_z`: физический
+зазор всегда равен `descend_z`, каким бы ни был абсолютный нуль. Если
+контрольный замер отличается от нуля больше чем на `MAX_ZERO_DEV` (0.5 мм),
+макрос прерывается **до** scan-прохода и печатает полный цикл калибровки
+(`Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG` → `PROBE` →
+`SET_GCODE_OFFSET Z=<минус показание>` → `Z_OFFSET_APPLY_PROBE` →
+`SAVE_CONFIG`); расхождение больше 0.05 мм печатается предупреждением.
 Проходов именно два отдельных макроса, потому что шаблон `gcode_macro`
 рендерится целиком до выполнения G-code и не может использовать результат
 `PROBE`, полученный в том же теле. Точный проход требует eddy-ветку
@@ -265,8 +270,10 @@ features=...,eddy_f
   `[probe]` и `[probe_eddy_current]`. Z-хоуминг остаётся на
   `probe:z_virtual_endstop` из механики, `[safe_z_home]` не меняется (вариант
   с аппаратным концевиком — в «Гибриде» ниже).
-- `x_offset`/`y_offset` в модуле — плейсхолдеры `0`: их измеряют по факту
-  крепления катушки (в примере Mellow — `21.42`). Катушку ставят в 2–3 мм над
+- `x_offset`/`y_offset` в модуле — плейсхолдеры `0`; конвенция Klipper:
+  **позиция щупа минус позиция сопла** (подробно — в «Гибриде» ниже). Измеренные
+  значения живут в `printers/<profile>/machine-extras.cfg`, как и override
+  `i2c_address`: это факт конкретной машины. Катушку ставят в 2–3 мм над
   соплом, а `descend_z: 2.5` — зазор сопло–стол, на котором останавливается
   пробирование. Собственного `z_offset` у eddy нет: в текущем Klipper это лишь
   устаревший псевдоним `descend_z`, и обе опции вместе недопустимы (старт
@@ -345,17 +352,88 @@ included value`), а `printer.cfg` — главный файл: при `SAVE_CON
 Z=0 по бумаге, после чего расхождение `PROBE` с нулём убирают
 `Z_OFFSET_APPLY_PROBE`.
 
-Для scan-прохода QGL высоту сканирования вычисляет сам макрос (см. раздел про
-`homing.cfg` выше): она равна `измеренный Z + descend_z` из контрольного
-`PROBE`. Для `BED_MESH_CALIBRATE METHOD=scan` параметр по-прежнему передают
-вручную — `HORIZONTAL_MOVE_Z=<descend_z>` (2.5): таблица `calibrate` покрывает
-только свой диапазон, а штатные 5 мм у `bed_mesh` и 10 мм у QGL выходят за
-него — `probe_eddy_current sensor not in valid range`. Понижать
-`horizontal_move_z` в секциях до 2.5 нельзя: в режиме `automatic` (descend)
-пробирование начинается с этой высоты и сразу упрётся в `descend_z`.
-`rapid_scan` для QGL не рекомендуется: он менее точен, а ошибка датчика в
-`scan`/`rapid_scan` поднимается только после прохода всех четырёх точек —
-именно поэтому перед точным проходом и стоит грубый descend.
+#### Смещение катушки: знак, проверка, влияние
+
+`x_offset`/`y_offset` в Klipper — это **позиция щупа минус позиция сопла**
+(`manual_probe` считает `bed_x = test_x + x_offset`, а `ProbePointsHelper`
+двигает сопло в `point − offset`). На v24-350 центр катушки стоит за соплом
+на 33 мм по +Y, поэтому в `machine-extras.cfg` профиля стоит `y_offset: 33`;
+`x_offset: 0` — предположение о симметрии. Плейсхолдеры `0` в
+`std.configs/sht36-v3.eddy-f.cfg` остаются: измеренный факт машины живёт в
+профиле, как и override `i2c_address`.
+
+Проверка знака и величины — одна команда (сопло встаёт на `Y = 175 − 33`):
+
+```text
+G28
+G1 X175 Y142 Z10 F6000
+PROBE
+```
+
+Ожидание: `Result: at 175.000,175.000 estimate contact at z=...`
+(`bed_y = toolhead_y + y_offset = 142 + 33`). Если Klipper печатает
+`109.000`, знак перевёрнут и дальше идти нельзя. Заодно подтверждается
+`bed_x = 175`, то есть `x_offset: 0`.
+
+Klipper применяет смещение только в `bed_mesh` (`BedMeshCalibrate` вызывает
+`probe_helper.use_xy_offsets(True)`). `quad_gantry_level`, `z_tilt` и
+`resonance_tester` двигают портал по своим `points` как по позициям сопла,
+поэтому якоря QGL в `printers/v24-350/anchors.cfg` записаны как
+«точка стола − offset»: желаемые точки под катушкой `(50,60)`, `(50,290)`,
+`(300,290)`, `(300,60)` превращаются в
+`points: 50,27 / 50,257 / 300,257 / 300,27`. Порядок точек 0..3 сохранён от
+каталога, чтобы сопла Z-осей не перепутались. `gantry_corners` не меняются:
+Klipper считает экстраполяцию по `bed_x/bed_y`, то есть уже в координатах
+стола.
+
+Смещение **не** меняет Z-калибровки: `position_endstop` концевика и остаток
+`PROBE` от `y_offset` не зависят, меняется только XY-атрибуция точек. Ноль
+стенда сведён: `PROBE` после `G28 Z` даёт остаток ≈ `+0.11` мм (2026-11-21).
+
+Передняя граница — ход сопла, а не край стола: ближайшая точка стола под
+катушкой `Y = 33`, потому что сопло не может уйти ниже `position_min_y = 0`.
+По X смещения нет, границы симметричны.
+
+#### `BED_MESH_CALIBRATE` по умолчанию = scan
+
+`std.macros/homing.cfg` оборачивает `BED_MESH_CALIBRATE`
+(`rename_existing: BED_MESH_CALIBRATE_BASE`) так же, как
+`QUAD_GANTRY_LEVEL`. На eddy-машине голый вызов сначала делает контрольный
+`PROBE` в `zero_reference_position` (макрос `_ZERO_REF_PROBE` сам компенсирует
+`x_offset`/`y_offset`), затем scan-проход на высоте `bed_z + descend_z`.
+Причина та же, что у QGL: scan идёт на абсолютном Z, а ошибка «датчик вне
+диапазона» поднимается только после всех точек, поэтому высота должна быть
+измеренной, а не статическими `2.5`. `descend_z` берётся из
+`[probe_eddy_current <имя>]`, guard прерывает прогон, если поверхность уехала
+больше чем на `MAX_ZERO_DEV` (0.5 мм) от нуля.
+
+Правила обёртки:
+
+- вызов с `METHOD=...` (например `METHOD=automatic`) идёт напрямую в Klipper
+  одним проходом: метод и высоту тогда задаёт оператор;
+- физический `[probe]` (машина `voron-t`) всегда идёт прямой веткой — у него
+  нет scan-режима;
+- явный `HORIZONTAL_MOVE_Z=` перекрывает расчётный: `{rawparams}` стоит
+  последним, а Klipper оставляет последнее значение ключа;
+- обёртка намеренно не погружается в `_PROBE_TEMP_GUARD` (сетку снимают
+  горячей), дрейф щупа компенсирует `[temperature_probe fly_eddy_probe]`.
+
+Высота scan для QGL вычисляется так же — `измеренный Z + descend_z` из
+контрольного `PROBE`. Если `BED_MESH_CALIBRATE` вызван с `METHOD=scan` явно,
+`HORIZONTAL_MOVE_Z=<descend_z>` (2.5) по-прежнему передают вручную: таблица
+`calibrate` покрывает только свой диапазон, а штатные 5 мм у `bed_mesh` и
+10 мм у QGL выходят за него — `probe_eddy_current sensor not in valid range`.
+Понижать `horizontal_move_z` в секциях до 2.5 нельзя: в режиме `automatic`
+(descend) пробирование начинается с этой высоты и сразу упрётся в
+`descend_z`. `rapid_scan` не рекомендуется: он менее точен, а ошибка датчика в
+`scan`/`rapid_scan` поднимается только после прохода всех точек — именно
+поэтому перед точным проходом и стоит грубый descend.
+
+Полный цикл калибровки нуля (guard в `_QGL_FINE` теперь печатает его целиком):
+`Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG`, затем `PROBE` →
+`SET_GCODE_OFFSET Z=<минус показание>` → `Z_OFFSET_APPLY_PROBE` →
+`SAVE_CONFIG`. Шаг `SET_GCODE_OFFSET` обязателен: без активного gcode-offset
+`Z_OFFSET_APPLY_PROBE` отвечает `Nothing to do: Z Offset is 0`.
 
 Контроль согласованности двух Z=0: после `G28 Z` команда `PROBE` на столе
 должна дать ≈ 0 (± 0.02 мм); расхождение означает, что одна из калибровок
@@ -385,6 +463,22 @@ override — в его `machine-extras.cfg`), а `position_endstop` в его
   Обратная ошибка тоже ловится: `position_endstop` рядом с
   `probe:z_virtual_endstop` — Klipper такую опцию не читает и падает на
   `Option 'position_endstop' is not valid in section 'stepper_z'`.
+- **ERROR** — точки, к которым Klipper смещение щупа не применяет
+  (`quad_gantry_level points`, `z_tilt points`, `resonance_tester
+  probe_points`), выносят катушку `point + (x_offset, y_offset)` за лимиты
+  оси. Сообщение печатает готовые координаты катушки; `points` надо писать
+  как «точка стола − offset».
+- **ERROR** — `bed_mesh` проверяется по двум наборам границ:
+  `mesh_min`/`mesh_max` — позиция катушки, она должна лежать на столе, а
+  `mesh − offset` — позиция сопла, она должна остаться в
+  `position_min/position_max`. Раньше проверялось только второе.
+- **WARNING** — ненулевые `x_offset`/`y_offset` вместе с
+  `quad_gantry_level`/`z_tilt`: напоминание, что якоря задаются как «точка
+  стола − offset».
+- **NOTICE** — сетка меньше 0.8 площади достижимой зоны: печатает расчётные
+  `mesh_min`/`mesh_max`/`probe_count` по формуле
+  `max(position_min + offset + 2, edge)` / `min(position_max + offset, bed −
+  edge)` с маржой `edge = 12 мм` под катушкой.
 - **WARNING** — `[mcu NAME]` объявлен, но на него нет ни одной ссылки: признак
   осиротевшей секции от платы, которой на машине нет. Неявный `mcu` и `host`
   предупреждение не вызывают.
@@ -1016,14 +1110,27 @@ Klipper. Грязный клон (`git status` не пуст) Moonraker обно
   `QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`. На стенде v24-350 (2026-11-19)
   грубый descend сходится за ~18 с (разброс 0.035 мм), контрольный `PROBE`
   вместе с точным scan — за ~22 с (0.004 мм при допуске 0.015), явный
-  одиночный проход — за ~14 с. Полный голый вызов там пока упирается в новый
-  guard: нуль стенда не откалиброван, `PROBE` после `G28 Z` даёт ≈ -0.6 мм,
-  поэтому сначала нужны `Z_ENDSTOP_CALIBRATE` и `Z_OFFSET_APPLY_PROBE`.
+  одиночный проход — за ~14 с. Guard больше не мешает: нуль стенда сведён,
+  `PROBE` после `G28 Z` даёт остаток ≈ `+0.11` мм (2026-11-21). Голый
+  `BED_MESH_CALIBRATE` на eddy-машине теперь тоже двухшаговый (контрольный
+  `PROBE` + scan на `bed_z + descend_z`), а расширенная сетка 15×14 на
+  v24-350 расчётно идёт около 8 минут вместо ~2 на прежних 140×140 (реальное
+  время замеряется на стенде).
 - `anchors.cfg` для voron-t содержит унаследованные `max_z 105` и лимиты `153/156`;
   они помечены TODO до замера по физическим упорам. Правая сторона треугольника
   принята равной 245 мм по измерению левой.
-- Маржа `bed_mesh` для размеров кроме 150 — каталожное значение `0.3·S` до
-  замеров на конкретных машинах.
+- Маржа `bed_mesh` для размеров кроме 150 задаётся не каталожным `0.3·S`, а
+  формулой достижимой зоны по измеренному смещению щупа (`P` — точка стола
+  под катушкой, `edge` — маржа катушки от края стола, 2 мм — запас на член с
+  ходом): `mesh_min = max(position_min + offset + 2, edge)`,
+  `mesh_max = min(position_max + offset, bed − edge)`. На v24-350 при
+  `y_offset: 33` и `edge = 12` это `mesh_min: 12, 35`, `mesh_max: 338, 338`,
+  `probe_count: 15, 14` (~23.3 мм шаг, расчётно ~8 мин scan-прогона). Передняя граница
+  упирается в ход сопла, задняя и боковые — в маржу под катушкой; зона
+  `Y < 33` физически не пробируется, печать там опирается на bicubic-
+  экстраполяцию. `edge` — стартовое допущение: систематический уклон
+  последнего ряда в `BED_MESH_OUTPUT` лечат увеличением `edge`, точечные
+  помехи (клипсы, магниты) — через `faulty_region_N_min/max`.
 - Ветка `eddy` (`std.configs/sht36-v3.eddy.cfg`, встроенный чип SHT36 Max V3)
   по-прежнему выключена: макросы `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` не
   перенесены с машины-донора. Новая опция `eddy_f` самодостаточна и этих
@@ -1179,8 +1286,10 @@ wraps `G28` (only when Z is part of the request — a bare `G28` or `G28 Z`) and
 the command waits with `M109`; if the target is already lower but the nozzle is
 hotter than 155 °C, the command waits for cooldown via `TEMPERATURE_WAIT`.
 `G28 X Y` and `G28 Y` (in `PRINT_END`, `CANCEL_PRINT`) skip the check and are
-not delayed. `BED_MESH_CALIBRATE` is deliberately not wrapped — a mesh is taken
-at print temperature. The module is included by `profile.cfg` for the v24
+not delayed. `BED_MESH_CALIBRATE` is wrapped separately (see
+"`BED_MESH_CALIBRATE` defaults to scan" below), but deliberately **not**
+through this guard: a mesh is taken at print temperature, and the wrapper only
+activates on eddy machines. The module is included by `profile.cfg` for the v24
 model; the wrappers rename the commands on `klippy:connect`, so `G28.1` still
 goes through `[safe_z_home]` (30 mm lift, probe at the bed centre) and
 `QUAD_GANTRY_LEVEL_BASE` through the `[quad_gantry_level]` module.
@@ -1188,14 +1297,17 @@ goes through `[safe_z_home]` (30 mm lift, probe at the bed centre) and
 A bare `QUAD_GANTRY_LEVEL` call on an eddy machine runs two passes. First the
 rough descend pass with `RETRY_TOLERANCE=0.25` and `RETRIES=2`: in that mode
 probing stops `descend_z` above the bed, so a sagged rear gantry corner is not
-pushed into it. Then `_QGL_ZERO_PROBE` measures the absolute bed height with
+pushed into it. Then `_ZERO_REF_PROBE` measures the absolute bed height with
 `PROBE` at the `zero_reference_position` point (the axis centre when there is
-no mesh), and `_QGL_FINE` starts the precise `METHOD=scan` pass with
-`HORIZONTAL_MOVE_Z = measured Z + descend_z`, so the physical gap is always
-`descend_z` whatever the absolute zero is. If the check probe differs from
-zero by more than `MAX_ZERO_DEV` (0.5 mm), the macro aborts **before** the scan
-and asks for recalibration (`Z_ENDSTOP_CALIBRATE` + `Z_OFFSET_APPLY_PROBE`);
-a deviation above 0.05 mm is reported as a warning. The passes are separate
+no mesh); the nozzle goes to "bed point - offset", because that is a bed
+coordinate and not a nozzle position. `_QGL_FINE` starts the precise
+`METHOD=scan` pass with `HORIZONTAL_MOVE_Z = measured Z + descend_z`, so the
+physical gap is always `descend_z` whatever the absolute zero is. If the check
+probe differs from zero by more than `MAX_ZERO_DEV` (0.5 mm), the macro aborts
+**before** the scan and prints the full zero cycle (`Z_ENDSTOP_CALIBRATE` +
+`SAVE_CONFIG` → `PROBE` → `SET_GCODE_OFFSET Z=<minus the reading>` →
+`Z_OFFSET_APPLY_PROBE` → `SAVE_CONFIG`); a deviation above 0.05 mm is reported
+as a warning. The passes are separate
 macros because a `gcode_macro` template is rendered in full before its G-code
 runs and cannot use a `PROBE` result obtained in the same body. The fine pass
 needs an eddy branch (`eddy_f`/`eddy`); a physical `[probe]` keeps the single
@@ -1297,8 +1409,10 @@ features=...,eddy_f
   `[probe_eddy_current]` at the same time. Z homing stays on the mechanics
   `probe:z_virtual_endstop` and `[safe_z_home]` is unchanged (the hardware
   switch variant is the "Hybrid" section below).
-- `x_offset`/`y_offset` in the module are `0` placeholders: measure them at the
-  actual coil mount (the Mellow example shows `21.42`). Mount the coil 2-3 mm
+- `x_offset`/`y_offset` in the module are `0` placeholders; the Klipper
+  convention is **probe position minus nozzle position** (see "Hybrid" below).
+  Measured values live in `printers/<profile>/machine-extras.cfg`, like the
+  `i2c_address` override: they are facts of one machine. Mount the coil 2-3 mm
   above the nozzle; `descend_z: 2.5` is the nozzle-to-bed gap at which probing
   stops. The eddy probe has no `z_offset` of its own: in a current Klipper that
   is only the deprecated alias of `descend_z`, and both options together abort
@@ -1375,17 +1489,90 @@ the coil at the recommended 2-3 mm above the nozzle, or calibrate from a raised
 position and set the zero separately: `Z_ENDSTOP_CALIBRATE` defines Z=0 on
 paper, then the `PROBE` difference is removed with `Z_OFFSET_APPLY_PROBE`.
 
-For the QGL scan pass the macro derives the scan height itself (see the
-`homing.cfg` section above): it is `measured Z + descend_z` from the check
-`PROBE`. `BED_MESH_CALIBRATE METHOD=scan` still takes the parameter by hand,
-`HORIZONTAL_MOVE_Z=<descend_z>` (2.5): the `calibrate` table covers only its
-own range, and the default 5 mm of `bed_mesh` and 10 mm of QGL fall outside it -
-`probe_eddy_current sensor not in valid range`. Do not lower `horizontal_move_z`
-in the sections to 2.5: in `automatic` (descend) mode probing starts at that
-height and would hit `descend_z` immediately. `rapid_scan` is not recommended
-for QGL: it is less accurate, and in `scan`/`rapid_scan` a sensor error is
-raised only after all four points have been probed - which is exactly why the
-rough descend pass runs before the fine one.
+#### Probe offset: sign, one-command check, consequences
+
+In Klipper `x_offset`/`y_offset` are the **probe position minus the nozzle
+position** (`manual_probe` computes `bed_x = test_x + x_offset`, while
+`ProbePointsHelper` moves the nozzle to `point − offset`). On v24-350 the coil
+centre sits 33 mm behind the nozzle, so the profile's `machine-extras.cfg`
+carries `y_offset: 33`; `x_offset: 0` is the symmetry assumption. The `0`
+placeholders in `std.configs/sht36-v3.eddy-f.cfg` stay: the measured value is a
+machine fact and lives in the profile, like the `i2c_address` override.
+
+The sign and magnitude are checked with one command (the nozzle goes to
+`Y = 175 − 33`):
+
+```text
+G28
+G1 X175 Y142 Z10 F6000
+PROBE
+```
+
+Expected: `Result: at 175.000,175.000 estimate contact at z=...`
+(`bed_y = toolhead_y + y_offset = 142 + 33`). A `109.000` reply means the sign
+is inverted and nothing further should be run. The same run confirms
+`bed_x = 175`, i.e. `x_offset: 0`.
+
+Klipper applies the offsets only in `bed_mesh` (`BedMeshCalibrate` calls
+`probe_helper.use_xy_offsets(True)`). `quad_gantry_level`, `z_tilt` and
+`resonance_tester` move the toolhead by their `points` as nozzle positions, so
+the QGL anchors in `printers/v24-350/anchors.cfg` are written as
+"bed point - offset": the desired coil points `(50,60)`, `(50,290)`,
+`(300,290)`, `(300,60)` become
+`points: 50,27 / 50,257 / 300,257 / 300,27`. The 0..3 order is kept from the
+catalog so the Z axes do not swap. `gantry_corners` are unchanged: Klipper
+extrapolates from `bed_x/bed_y`, i.e. already in bed coordinates.
+
+The offset does **not** change Z calibrations: the switch `position_endstop`
+and the `PROBE` residual are independent of `y_offset`; only the XY attribution
+of the points moves. The bench zero is matched: `PROBE` after `G28 Z` reads a
+residual of about `+0.11` mm (2026-11-21).
+
+The front boundary is the nozzle travel, not the bed edge: the nearest bed
+point the coil can reach is `Y = 33`, because the nozzle cannot go below
+`position_min_y = 0`. There is no X offset, so the side boundaries are
+symmetric.
+
+#### `BED_MESH_CALIBRATE` defaults to scan
+
+`std.macros/homing.cfg` wraps `BED_MESH_CALIBRATE`
+(`rename_existing: BED_MESH_CALIBRATE_BASE`) the same way as
+`QUAD_GANTRY_LEVEL`. On an eddy machine a bare call first probes the bed surface
+once at `zero_reference_position` (`_ZERO_REF_PROBE` compensates
+`x_offset`/`y_offset` itself), then scans at `bed_z + descend_z`. The reason
+matches QGL: scan mode runs at an absolute Z and an eddy out-of-range error is
+raised only after every point has been probed, so the height must be measured
+rather than the static `2.5`. `descend_z` comes from
+`[probe_eddy_current <name>]`, and the guard aborts the run when the surface is
+further than `MAX_ZERO_DEV` (0.5 mm) from zero.
+
+Wrapper rules:
+
+- a call with `METHOD=...` (for example `METHOD=automatic`) goes straight to
+  Klipper as a single pass: the operator then owns the method and the height;
+- a physical `[probe]` (the `voron-t` machine) always takes the pass-through
+  branch: it has no scan mode;
+- an explicit `HORIZONTAL_MOVE_Z=` overrides the calculated value: `{rawparams}`
+  comes last and Klipper keeps the last value of a repeated option;
+- the wrapper is deliberately not put behind `_PROBE_TEMP_GUARD` (a mesh is
+  taken hot); `[temperature_probe fly_eddy_probe]` compensates the drift.
+
+The QGL scan height is derived the same way - `measured Z + descend_z` from the
+check `PROBE`. If `BED_MESH_CALIBRATE` is called with an explicit `METHOD=scan`,
+`HORIZONTAL_MOVE_Z=<descend_z>` (2.5) is still passed by hand: the `calibrate`
+table covers only its own range, and the default 5 mm of `bed_mesh` and 10 mm of
+QGL fall outside it - `probe_eddy_current sensor not in valid range`. Do not
+lower `horizontal_move_z` in the sections to 2.5: in `automatic` (descend) mode
+probing starts at that height and would hit `descend_z` immediately.
+`rapid_scan` is not recommended: it is less accurate, and in
+`scan`/`rapid_scan` a sensor error is raised only after all points have been
+probed - which is exactly why the rough descend pass runs before the fine one.
+
+The full zero calibration cycle (the `_QGL_FINE` guard now prints it in full):
+`Z_ENDSTOP_CALIBRATE` + `SAVE_CONFIG`, then `PROBE` →
+`SET_GCODE_OFFSET Z=<minus the reading>` → `Z_OFFSET_APPLY_PROBE` →
+`SAVE_CONFIG`. The `SET_GCODE_OFFSET` step is mandatory: without an active
+gcode offset `Z_OFFSET_APPLY_PROBE` answers `Nothing to do: Z Offset is 0`.
 
 Consistency check of the two Z=0 references: after `G28 Z` the `PROBE` command
 at the bed centre must read about 0 (+/- 0.02 mm); a difference means one of
@@ -1414,6 +1601,22 @@ references against the original option text:
   opposite mistake is caught too: `position_endstop` next to
   `probe:z_virtual_endstop`, which Klipper never reads and rejects with
   `Option 'position_endstop' is not valid in section 'stepper_z'`.
+- **ERROR** — a point to which Klipper does not apply the probe offset
+  (`quad_gantry_level points`, `z_tilt points`, `resonance_tester
+  probe_points`) puts the coil at `point + (x_offset, y_offset)` outside the
+  axis limits. The message prints the ready coil coordinates; `points` must be
+  written as "bed point - offset".
+- **ERROR** — `bed_mesh` is checked against two boundary sets:
+  `mesh_min`/`mesh_max` are the coil positions and must lie on the bed, while
+  `mesh - offset` is the nozzle position and must stay inside
+  `position_min/position_max`. Only the second set was checked before.
+- **WARNING** — nonzero `x_offset`/`y_offset` together with
+  `quad_gantry_level`/`z_tilt`: a reminder that the anchors are written as
+  "bed point - offset".
+- **NOTICE** — the mesh is smaller than 0.8 of the reachable area: prints the
+  calculated `mesh_min`/`mesh_max`/`probe_count` using
+  `max(position_min + offset + 2, edge)` /
+  `min(position_max + offset, bed - edge)` with a coil `edge` of 12 mm.
 - **WARNING** — `[mcu NAME]` is declared but nothing references it, which
   signals an orphaned section from a board the machine does not have. The
   implicit `mcu` and `host` never produce this warning.
@@ -2048,15 +2251,29 @@ printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both
   any parameter, for example `QUAD_GANTRY_LEVEL RETRY_TOLERANCE=0.015`. On the
   v24-350 bench (2026-11-19) the rough descend converges in about 18 s (0.035 mm
   spread) and the check `PROBE` plus the fine scan take about 22 s (0.004 mm at
-  a 0.015 tolerance); an explicit single pass takes about 14 s. The full bare
-  call is still blocked there by the new guard: the bench zero is not
-  calibrated and `PROBE` after `G28 Z` reads about -0.6 mm, so
-  `Z_ENDSTOP_CALIBRATE` and `Z_OFFSET_APPLY_PROBE` must run first.
+  a 0.015 tolerance); an explicit single pass takes about 14 s. The guard no
+  longer blocks it: the bench zero is matched and `PROBE` after `G28 Z` leaves a
+  residual of about `+0.11` mm (2026-11-21). A bare `BED_MESH_CALIBRATE` on an
+  eddy machine is now two-step as well (check `PROBE` + scan at
+  `bed_z + descend_z`), and the widened 15x14 mesh on v24-350 is estimated at
+  about 8 minutes instead of ~2 for the former 140x140 (the real time is
+  measured on the bench).
 - voron-t `anchors.cfg` keeps inherited `max_z 105` and `153/156` limits, marked TODO
   until the physical stops are measured. The right triangle side is assumed 245 mm
   from the measured left side.
-- `bed_mesh` margin for sizes other than 150 is the catalog value `0.3·S` until each
-  machine is measured.
+- The `bed_mesh` margin for sizes other than 150 is no longer the catalog
+  `0.3·S`: it follows the reachable-zone formula with the measured probe offset
+  (`P` is the bed point under the coil, `edge` the coil margin at the bed edge,
+  and 2 mm a reserve on the travel term):
+  `mesh_min = max(position_min + offset + 2, edge)`,
+  `mesh_max = min(position_max + offset, bed - edge)`. On v24-350 with
+  `y_offset: 33` and `edge = 12` this is `mesh_min: 12, 35`,
+  `mesh_max: 338, 338`, `probe_count: 15, 14` (~23.3 mm per step, an estimated ~8 min scan
+  run). The front boundary is the nozzle travel, the rear and sides the coil
+  margin; `Y < 33` cannot be probed physically, so printing there relies on the
+  bicubic extrapolation. `edge` is a starting assumption: a systematic slope in
+  the last row of `BED_MESH_OUTPUT` is treated by increasing `edge`, and local
+  obstacles (clips, magnets) by `faulty_region_N_min/max`.
 - The `eddy` branch (`std.configs/sht36-v3.eddy.cfg`, the built-in SHT36 Max V3
   chip) is still disabled: the `std.macros/{eddy,G28,TEMP_NOZZLE}.cfg` files
   have not been copied from the donor machine yet. The new `eddy_f` option is

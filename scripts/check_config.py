@@ -26,11 +26,15 @@ Diagnostics:
            ([probe] + [probe_eddy_current ...]), physical [stepper_z]
            endstop without position_endstop, position_endstop next to a
            virtual endstop, active stealthchop_threshold >= 1000 (the fleet
-           invariant is SpreadCycle)
+           invariant is SpreadCycle), a probe point that puts the bed edge or
+           the un-compensated coil outside its limits
   WARNING  duplicate section name, repeated option (last-wins), TMC section
-           without an explicit stealthchop_threshold
+           without an explicit stealthchop_threshold, probe offsets on a
+           leveling machine (its points are nozzle positions)
   NOTICE   module .cfg under std.configs/ or std.macros/ that is not
-           included by any profile and is not a known fleet alternative
+           included by any profile and is not a known fleet alternative,
+           a bed_mesh much smaller than the zone reachable with the probe
+           offsets
 """
 
 from __future__ import annotations
@@ -73,6 +77,15 @@ CATALOG_PREFIXES = (
     "std.configs/motors/",
     "std.configs/geometry/",
 )
+
+# Reachable-mesh hint (NOTICE only).  The EDDY-F coil is roughly 16 mm wide, so
+# an `edge` of 12 mm keeps it fully over the conductive surface; the 2 mm
+# travel margin keeps the nozzle off position_min exactly.  Both are starting
+# assumptions, not measurements: a machine may widen the mesh once the edge
+# rows are checked, hence a hint and never an error.
+BED_EDGE_MARGIN = 12.0
+TRAVEL_MARGIN = 2.0
+MESH_STEP_TARGET = 23.3
 
 # Layers that intentionally reopen sections to override earlier values. Their
 # duplicate-section and repeated-option diagnostics are expected noise.
@@ -922,6 +935,11 @@ class Checker:
         off_x = off_x or 0.0
         off_y = off_y or 0.0
 
+        # machine.conf size= is the bed dimension; without it the checks that
+        # compare the coil position against the bed edge are skipped.
+        machine = self._load_machine_conf(machine_conf)
+        bed_size = machine.get("size")
+
         def check_xy(x: float, y: float, label: str, apply_offset: bool) -> None:
             tool_x = x - off_x if apply_offset else x
             tool_y = y - off_y if apply_offset else y
@@ -938,14 +956,78 @@ class Checker:
                     % (label, tool_y, low_y, high_y)
                 )
 
+        def check_bed(x: float, y: float, label: str) -> None:
+            if bed_size is None:
+                return
+            if not (0 - 1e-6 <= x <= bed_size + 1e-6):
+                self.error(
+                    "geometry: %s X=%.3f is outside the %.0f mm bed"
+                    % (label, x, bed_size)
+                )
+            if not (0 - 1e-6 <= y <= bed_size + 1e-6):
+                self.error(
+                    "geometry: %s Y=%.3f is outside the %.0f mm bed"
+                    % (label, y, bed_size)
+                )
+
+        def check_coil_points(label: str, points: list[tuple[float, ...]]) -> None:
+            """Klipper does not apply the probe offset to these points.
+
+            quad_gantry_level, z_tilt and resonance_tester move the toolhead by
+            the configured points as nozzle positions, so the coil (the sensor
+            that actually probes) lands at point + offset.  That position must
+            stay inside the travel limits, and the message prints the coil
+            coordinates so the fix is a plain subtraction.
+            """
+            if not (off_x or off_y):
+                return
+            low_x, high_x = limits["x"]
+            low_y, high_y = limits["y"]
+            bad = []
+            for index, point in enumerate(points, 1):
+                x, y = float(point[0]), float(point[1])
+                coil_x, coil_y = x + off_x, y + off_y
+                if not (low_x - 1e-6 <= coil_x <= high_x + 1e-6) or not (
+                    low_y - 1e-6 <= coil_y <= high_y + 1e-6
+                ):
+                    bad.append(
+                        "point[%d] nozzle %.3f,%.3f -> coil %.3f,%.3f"
+                        % (index, x, y, coil_x, coil_y)
+                    )
+            if not bad:
+                return
+            self.error(
+                "geometry: %s are nozzle positions and Klipper does not "
+                "apply the probe offset there, so x_offset=%.3f y_offset=%.3f "
+                "puts the coil outside X [%.3f, %.3f] / Y [%.3f, %.3f]: %s.  "
+                "Write them as (bed point - offset); the offset is applied by "
+                "bed_mesh only."
+                % (
+                    label,
+                    off_x,
+                    off_y,
+                    low_x,
+                    high_x,
+                    low_y,
+                    high_y,
+                    "; ".join(bad),
+                )
+            )
+
         mesh_min = self._points("bed_mesh", "mesh_min")
         mesh_max = self._points("bed_mesh", "mesh_max")
         if mesh_min and mesh_max:
             (min_x, min_y), (max_x, max_y) = mesh_min[0], mesh_max[0]
             if max_x <= min_x or max_y <= min_y:
                 self.error("geometry: bed_mesh mesh_max must be above mesh_min")
-            check_xy(min_x, min_y, "bed_mesh mesh_min", True)
-            check_xy(max_x, max_y, "bed_mesh mesh_max", True)
+            # Two independent boundary sets: mesh_min/mesh_max are the coil
+            # positions (also the bed points), so they must lie on the bed;
+            # mesh - offset is the nozzle position and must stay in the travel
+            # range.  Only the second one is checked by Klipper itself.
+            check_bed(min_x, min_y, "bed_mesh mesh_min")
+            check_bed(max_x, max_y, "bed_mesh mesh_max")
+            check_xy(min_x, min_y, "bed_mesh mesh_min (nozzle)", True)
+            check_xy(max_x, max_y, "bed_mesh mesh_max (nozzle)", True)
             raw_count = self._opt("bed_mesh", "probe_count")
             if raw_count is not None:
                 try:
@@ -956,6 +1038,50 @@ class Checker:
                 if counts and (len(counts) != 2 or min(counts) < 3):
                     self.error(
                         "geometry: bed_mesh probe_count must be two integers >= 3"
+                    )
+            if bed_size is not None:
+                reach = []
+                for axis, offset in (("x", off_x), ("y", off_y)):
+                    low, high = limits[axis]
+                    lo = max(low + offset + TRAVEL_MARGIN, BED_EDGE_MARGIN)
+                    hi = min(high + offset, bed_size - BED_EDGE_MARGIN)
+                    reach.append((lo, hi))
+                (rx0, rx1), (ry0, ry1) = reach
+                reach_area = (rx1 - rx0) * (ry1 - ry0)
+                cur_area = (max_x - min_x) * (max_y - min_y)
+                if reach_area > 0 and cur_area < 0.8 * reach_area:
+
+                    def step_count(lo: float, hi: float) -> int:
+                        return max(3, int(round((hi - lo) / MESH_STEP_TARGET)) + 1)
+
+                    self.notice(
+                        "geometry: bed_mesh %.0fx%.0f mm covers %.0f%% of the "
+                        "reachable %.0fx%.0f mm (edge margin %.0f mm, %.0f mm "
+                        "travel margin).  With x_offset=%.3f y_offset=%.3f the "
+                        "reachable zone is X %.0f..%.0f, Y %.0f..%.0f: "
+                        "mesh_min: %.0f, %.0f / mesh_max: %.0f, %.0f / "
+                        "probe_count: %d, %d"
+                        % (
+                            max_x - min_x,
+                            max_y - min_y,
+                            100.0 * cur_area / reach_area,
+                            rx1 - rx0,
+                            ry1 - ry0,
+                            BED_EDGE_MARGIN,
+                            TRAVEL_MARGIN,
+                            off_x,
+                            off_y,
+                            rx0,
+                            rx1,
+                            ry0,
+                            ry1,
+                            rx0,
+                            ry0,
+                            rx1,
+                            ry1,
+                            step_count(rx0, rx1),
+                            step_count(ry0, ry1),
+                        )
                     )
 
         zero_ref = self._points("bed_mesh", "zero_reference_position")
@@ -977,10 +1103,24 @@ class Checker:
         if home:
             check_xy(home[0][0], home[0][1], "safe_z_home home_xy_position", False)
 
+        leveling = [
+            name
+            for name in ("quad_gantry_level", "z_tilt")
+            if cfg.has_section(name)
+        ]
+        if (off_x or off_y) and leveling:
+            self.warning(
+                "geometry: probe offsets x=%.3f y=%.3f are applied only by "
+                "bed_mesh; %s moves by `points` as nozzle positions, so its "
+                "anchors must be written as (bed point - offset)"
+                % (off_x, off_y, "/".join(leveling))
+            )
+
         for section in ("z_tilt", "quad_gantry_level"):
             points = self._points(section, "points")
             for index, (x, y) in enumerate(points, 1):
                 check_xy(x, y, "%s points[%d]" % (section, index), False)
+            check_coil_points("%s points" % section, points)
             if section == "quad_gantry_level" and points and len(points) != 4:
                 self.error("geometry: quad_gantry_level needs exactly 4 points")
             if section == "z_tilt" and points and len(points) < 3:
@@ -995,9 +1135,9 @@ class Checker:
                     "geometry: resonance_tester Z=%.3f is outside [%.3f, %.3f]"
                     % (z, low_z, high_z)
                 )
+        check_coil_points("resonance_tester probe_points", resonance)
 
         z_positions = self._points("z_tilt", "z_positions")
-        machine = self._load_machine_conf(machine_conf)
         if z_positions and "frame_w" in machine and "frame_d" in machine:
             xs = [x for x, _ in z_positions]
             ys = [y for _, y in z_positions]

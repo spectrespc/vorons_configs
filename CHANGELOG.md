@@ -198,6 +198,52 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Eddy-смещение щупа стало фактом профиля `v24-350`:
+  `[probe_eddy_current fly_eddy_probe] x_offset: 0, y_offset: 33` в
+  `machine-extras.cfg` (центр катушки за соплом на 33 мм по +Y, замер
+  2026-11-21; конвенция Klipper — «щуп минус сопло»). Комментарии
+  плейсхолдеров в `std.configs/sht36-v3.eddy.cfg` и `…eddy-f.cfg` переписаны
+  под эту конвенцию. `_QGL_ZERO_PROBE` переименован в `_ZERO_REF_PROBE` и
+  компенсирует смещение (сопло = точка стола − offset), поэтому guard и
+  высота scan считаются по столу в `175,175`, а не в `175,208`. Якоря QGL
+  профиля заданы как «точка стола − offset»
+  (`points: 50,27 / 50,257 / 300,257 / 300,27`) и симметричны относительно
+  175. `BED_MESH_CALIBRATE` на eddy-машинах обёрнут
+  (`rename_existing: BED_MESH_CALIBRATE_BASE`): голый вызов делает контрольный
+  `PROBE` и scan на `bed_z + descend_z`, `METHOD=...` идёт прямым проходом, а
+  явный `HORIZONTAL_MOVE_Z=` перекрывает расчёт. Сетка v24-350 расширена до
+  достижимого максимума `mesh_min: 12,35`, `mesh_max: 338,338`,
+  `probe_count: 15,14` (передняя граница — ход сопла при `y_offset: 33`,
+  задняя и боковые — маржа 12 мм под катушкой; ~8 мин scan-прогона). Guard
+  `_QGL_FINE` печатает полный цикл нуля с `SET_GCODE_OFFSET`.
+  `check_config.py`: ERROR, если катушка в `points` QGL/z_tilt/resonance или
+  `mesh_min`/`mesh_max` выходит за лимиты или стол (проверяются оба набора
+  границ), WARNING о ручной компенсации якорей и NOTICE с расчётной
+  достижимой зоной, когда сетка меньше 0.8 её площади.
+  **EN:** The eddy probe offset became a profile fact on `v24-350`:
+  `[probe_eddy_current fly_eddy_probe] x_offset: 0, y_offset: 33` in
+  `machine-extras.cfg` (the coil centre sits 33 mm behind the nozzle on +Y,
+  measured 2026-11-21; the Klipper convention is "probe minus nozzle"). The
+  placeholder comments in `std.configs/sht36-v3.eddy.cfg` and `…eddy-f.cfg`
+  were rewritten to that convention. `_QGL_ZERO_PROBE` became `_ZERO_REF_PROBE`
+  and compensates the offset (nozzle = bed point - offset), so the guard and
+  the scan height are computed for the bed point `175,175` instead of the
+  nozzle position `175,208`. The profile's QGL anchors are written as
+  "bed point - offset" (`points: 50,27 / 50,257 / 300,257 / 300,27`) and are
+  symmetric about 175. `BED_MESH_CALIBRATE` is wrapped on eddy machines
+  (`rename_existing: BED_MESH_CALIBRATE_BASE`): a bare call runs a check
+  `PROBE` and a scan at `bed_z + descend_z`, `METHOD=...` stays a direct pass,
+  and an explicit `HORIZONTAL_MOVE_Z=` overrides the calculated value. The
+  v24-350 mesh grew to the reachable maximum `mesh_min: 12,35`,
+  `mesh_max: 338,338`, `probe_count: 15,14` (front boundary is the nozzle
+  travel at `y_offset: 33`, rear and sides the 12 mm coil margin; ~8 min scan
+  run). The `_QGL_FINE` guard prints the full zero cycle including
+  `SET_GCODE_OFFSET`. `check_config.py` gained an ERROR when the coil in QGL /
+  z_tilt / resonance points or in `mesh_min`/`mesh_max` leaves the limits or
+  the bed (both boundary sets are checked), a WARNING about manual anchor
+  compensation and a NOTICE with the calculated reachable zone when the mesh
+  is below 0.8 of its area.
+
 - **RU:** `deploy_configs.sh` теперь управляет `printer.cfg` до маркера
   `#*# <---------------------- SAVE_CONFIG ---------------------->`: при каждом
   деплое голова файла заменяется копией из `printers/<id>/printer.cfg`, а
