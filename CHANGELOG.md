@@ -198,6 +198,32 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Микрошаг X/Y по умолчанию 32 → 64 в
+  `std.configs/mechanics/v24.cfg` и `std.configs/mechanics/trident.cfg`.
+  Основание — замеры `TEST_SPEED` на стенде v24-350 (2026-11-22): при 32
+  микрошагах в диапазоне 700–900 мм/с × 3000–10000 мм/с² мотор A терял шаги
+  (700/10000 воспроизводимо ~0.8 мм, 1000/3000 — до 2.4 мм), при 64 ни одна
+  клетка не превысила один полный шаг (максимум смещения 0.17 мм против
+  0.22 мм у 32). Один полный шаг остаётся 0.2 мм: 320 шагов/мм у v24,
+  400 шагов/мм у trident, то есть 192 кГц при 300 мм/с и 280 кГц при
+  700 мм/с — оба значения проверены на Manta M8P. Z и экструдеры не
+  изменены, лимиты `[printer]` тоже. Измеренная таблица рекомендованных
+  значений для 32/64/128 остаётся в
+  `printers/v24-350/machine-extras.cfg`. На самом trident 64 ещё не
+  перемерялись.
+  **EN:** X/Y microsteps default 32 -> 64 in
+  `std.configs/mechanics/v24.cfg` and `std.configs/mechanics/trident.cfg`.
+  Based on `TEST_SPEED` on the v24-350 bench (2026-11-22): at 32 microsteps
+  inside 700-900 mm/s x 3000-10000 mm/s^2 the A motor lost steps (700/10000
+  reproducibly ~0.8 mm, 1000/3000 up to 2.4 mm), while at 64 no cell exceeded
+  one full step (worst displacement 0.17 mm against 0.22 mm at 32). One full
+  step stays 0.2 mm: 320 steps/mm on v24, 400 steps/mm on trident, i.e.
+  192 kHz at 300 mm/s and 280 kHz at 700 mm/s - both verified on the Manta
+  M8P. Z and the extruders are unchanged, as are the `[printer]` limits. The
+  measured recommendation table for 32/64/128 stays in
+  `printers/v24-350/machine-extras.cfg`. The trident itself has not been
+  re-measured yet.
+
 - **RU:** Eddy-смещение щупа стало фактом профиля `v24-350`:
   `[probe_eddy_current fly_eddy_probe] x_offset: 0, y_offset: 33` в
   `machine-extras.cfg` (центр катушки за соплом на 33 мм по +Y, замер
