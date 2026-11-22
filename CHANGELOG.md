@@ -198,6 +198,28 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Лимиты `[printer]` подняты до рекомендованных значений для 64
+  микрошагов: v24 — `max_velocity: 300 → 750`, `max_accel: 3000 → 8500`;
+  trident — `max_velocity: 700 → 750`, `max_accel: 10000 → 8500`. Значения
+  взяты из измеренной таблицы `printers/v24-350/machine-extras.cfg`:
+  на стенде v24-350 при 64 микрошагах весь диапазон до 900 мм/с и
+  10000 мм/с² прошёл без потерь, применено с запасом ~15 %. На самом trident
+  замер не повторялся: 750 мм/с при 400 шагах/мм — это 300 кГц, поэтому на
+  первых прогонах надо смотреть на ошибки шагового генератора; прежние
+  700/10000 были каталожными. Собственные скорости `bed_mesh`, QGL и
+  `PRINT_START` не менялись, `RESTORE_DEFAULT_SETTING` вернёт новый
+  `max_accel`.
+  **EN:** `[printer]` limits raised to the recommended values for 64
+  microsteps: v24 - `max_velocity: 300 -> 750`, `max_accel: 3000 -> 8500`;
+  trident - `max_velocity: 700 -> 750`, `max_accel: 10000 -> 8500`. The values
+  come from the measured table in `printers/v24-350/machine-extras.cfg`: on
+  the v24-350 bench at 64 microsteps the whole range up to 900 mm/s and
+  10000 mm/s^2 passed without loss, and ~15 % margin is applied. The trident
+  itself was not re-measured: 750 mm/s at 400 steps/mm is 300 kHz, so the first
+  runs should watch for step-generation errors; the former 700/10000 were
+  catalog values. `bed_mesh`, QGL and `PRINT_START` keep their own speeds, and
+  `RESTORE_DEFAULT_SETTING` restores the new `max_accel`.
+
 - **RU:** Микрошаг X/Y по умолчанию 32 → 64 в
   `std.configs/mechanics/v24.cfg` и `std.configs/mechanics/trident.cfg`.
   Основание — замеры `TEST_SPEED` на стенде v24-350 (2026-11-22): при 32
