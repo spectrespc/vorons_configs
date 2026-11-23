@@ -818,6 +818,17 @@ python3 scripts/tmc_calc.py --update-module \
   остаётся **64**: 1125/10000 не проходит, а у 64 уже есть длинная тепловая и
   качественная история. У драйвера Y в LDO-модулях `diag1_pin: DIAG_1` теперь
   включён по умолчанию (как `DIAG_0` у X); на `CHOPCONF` это не влияет.
+- Лестница +15 % к 1500/15000 проверена на v24-350 (2026-11-23) на том же
+  чистом baseline, по 3 повтора на клетку и по критерию 0.1 мм (32 счётчика
+  при 64 микрошагах, 64 при 128). При 64 критерий держит только стартовая
+  750/8500, при 128 — непрерывно до 992/11241; 1141/12927 проваливает обе
+  серии, а выше снова чисто, то есть провалы не монотонны. `diag4` на всех
+  провальных клетках даёт `patterns 0/0` и весь сдвиг в `rehome` (до 2544
+  счётчиков = 4.0 мм при 128): снова уезжает привязка гоминга, а не теряется
+  шаг. 1500 мм/с при 128 — это 960 кГц на мотор, Manta M8P выдержал без
+  `Timer too close`/`Stepper move too late`. `LOST_STEPS` = 0, CAN без
+  `rx_error`/`tx_error`. Применённые 750/8500 и 64 микрошага не меняются;
+  правило запаса 15 % берётся от наивысшей монотонной клетки ≤ 0.1 мм.
 - X/Y и Z пересчитаны от пикового тока даташита в RMS (`--current-basis peak`,
   `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO 2.8 A peak → 1.9799 A RMS,
   17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS,
@@ -2048,6 +2059,19 @@ Script rules:
   print-quality history. The Y driver now enables `diag1_pin: DIAG_1` by
   default in the LDO modules (matching `DIAG_0` on X); `CHOPCONF` is
   unaffected.
+- A +15 % ladder up to 1500/15000 was measured on the v24-350 bench
+  (2026-11-23) on the same pure baseline, 3 repeats per cell, against a
+  0.1 mm criterion (32 counts at 64 microsteps, 64 at 128). At 64 only the
+  starting 750/8500 holds the criterion; at 128 it holds contiguously up to
+  992/11241; 1141/12927 fails both series while the cells above are clean
+  again, so the failures are not monotonic. `diag4` on every failing cell
+  gives `patterns 0/0` and moves the whole drift into `rehome` (up to 2544
+  counts = 4.0 mm at 128): the homing reference moves again, the pattern
+  keeps its steps. 1500 mm/s at 128 is 960 kHz per motor and the Manta M8P
+  handled it with no `Timer too close`/`Stepper move too late`. `LOST_STEPS`
+  stayed 0, CAN had no `rx_error`/`tx_error`. The applied 750/8500 and 64
+  microsteps stay; the 15 % margin rule is taken from the highest monotonic
+  cell <= 0.1 mm.
 - X/Y and Z are recalculated from the datasheet peak into RMS
   (`--current-basis peak`, `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO
   2.8 A peak → 1.9799 A RMS, 17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S

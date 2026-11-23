@@ -198,6 +198,28 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Лестница +15 % (750/8500 → 1500/15000) на v24-350 (2026-11-23,
+  baseline A, без VHIGH, 3 повтора на клетку, критерий 0.1 мм: 32 счётчика
+  при 64 микрошагах, 64 при 128). При 64 критерий держит только стартовая
+  750/8500, при 128 — непрерывно до 992/11241; 1141/12927 проваливает обе
+  серии, выше снова чисто (провалы не монотонны). `diag4` на всех провальных
+  клетках даёт `patterns 0/0` и весь сдвиг в `rehome` (до 2544 счётчиков =
+  4.0 мм при 128), то есть уезжает привязка гоминга, а не теряются шаги.
+  1500 мм/с при 128 — 960 кГц на мотор; Manta M8P выдержал без
+  `Timer too close`/`Stepper move too late`. `LOST_STEPS` = 0, CAN без
+  `rx_error`/`tx_error`. Применённые 750/8500 и микрошаги 64 не меняются.
+  **EN:** A +15 % ladder (750/8500 → 1500/15000) on the v24-350 bench
+  (2026-11-23, baseline A, no VHIGH, 3 repeats per cell, 0.1 mm criterion:
+  32 counts at 64 microsteps, 64 at 128). At 64 only the starting 750/8500
+  holds the criterion; at 128 it holds contiguously up to 992/11241;
+  1141/12927 fails both series and the cells above are clean again (the
+  failures are not monotonic). `diag4` on every failing cell gives
+  `patterns 0/0` and moves the whole drift into `rehome` (up to 2544 counts =
+  4.0 mm at 128), i.e. the homing reference moves, the steps are kept.
+  1500 mm/s at 128 is 960 kHz per motor; the Manta M8P handled it with no
+  `Timer too close`/`Stepper move too late`. `LOST_STEPS` stayed 0, CAN had
+  no `rx_error`/`tx_error`. The applied 750/8500 and microsteps 64 stay.
+
 - **RU:** X/Y с 128 микрошагами проверены той же серией +50 % (2026-11-23,
   baseline A, без VHIGH). Клетки 1000/12750, 1125/8500 и 1125/12750 — 3/3,
   1125/10000 — 1/3 (`dy` ≈ -507 счётчиков). `diag4` на 1125/10000 даёт
