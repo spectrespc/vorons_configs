@@ -523,6 +523,32 @@ def selftest_update() -> int:
           and explicit_report["sections"][0]["tbl_source"] == "cli",
           str(explicit_report["sections"][0]["tbl_source"]))
 
+    # The full-step switch is hand-set: high_velocity_threshold is not a
+    # driver_* field (Klipper derives THIGH from it), so it must survive a
+    # current recalculation untouched and must not be warned about.
+    fullstep = (
+        "[tmc5160 stepper_x]\n"
+        "cs_pin: UART_0\n"
+        "run_current: 1.9799\n"
+        "stealthchop_threshold: 0\n"
+        "high_velocity_threshold: 700\n"
+        "driver_VHIGHFS: 1\n"
+        "driver_VHIGHCHM: 1\n"
+    )
+    fullstep_args = build_parser().parse_args(
+        ["--vm", "48", "--motor", "LDO-42STH48-2804AC", "--i-factor", "1.0",
+         "--update-module", "fixture.cfg", "--sections", "stepper_x"]
+    )
+    eighth, fullstep_report = update_module_text(fullstep, fullstep_args, motors)
+    check("high_velocity_threshold preserved",
+          "high_velocity_threshold: 700" in eighth)
+    check("driver_VHIGHFS/CHM preserved",
+          "driver_VHIGHFS: 1" in eighth and "driver_VHIGHCHM: 1" in eighth)
+    check("VHIGH keys not reported unknown",
+          not any("vhigh" in item.lower()
+                  for item in fullstep_report["warnings"]),
+          str(fullstep_report["warnings"]))
+
     selective = build_parser().parse_args(
         ["--vm", "24", "--motor", "17HS4401S", "--i-factor", "1.0",
          "--update-module", "fixture.cfg", "--sections", "stepper_z1"]

@@ -27,14 +27,17 @@ Diagnostics:
            endstop without position_endstop, position_endstop next to a
            virtual endstop, active stealthchop_threshold >= 1000 (the fleet
            invariant is SpreadCycle), a probe point that puts the bed edge or
-           the un-compensated coil outside its limits
+           the un-compensated coil outside its limits, a driver_* option the
+           TMC module never reads, driver_VHIGHFS without
+           high_velocity_threshold (that is permanent full step)
   WARNING  duplicate section name, repeated option (last-wins), TMC section
-           without an explicit stealthchop_threshold, probe offsets on a
-           leveling machine (its points are nozzle positions)
+           without an explicit stealthchop_threshold, driver_VHIGHCHM without
+           high_velocity_threshold, probe offsets on a leveling machine (its
+           points are nozzle positions)
   NOTICE   module .cfg under std.configs/ or std.macros/ that is not
            included by any profile and is not a known fleet alternative,
            a bed_mesh much smaller than the zone reachable with the probe
-           offsets
+           offsets, high_velocity_threshold with neither VHIGH bit enabled
 """
 
 from __future__ import annotations
@@ -464,6 +467,89 @@ def tmc_fix_command(
     return " ".join(parts)
 
 
+# --- TMC driver fields and the full-step switch ---------------------------
+
+# The VHIGH mechanism only exists on drivers that have the THIGH register.
+# tmc_calc.py owns the per-family field table (every key it emits is checked
+# against it was verified against the Klipper sources), so importing it keeps
+# one list instead of two that can drift apart.
+FULLSTEP_FIELDS = ("VHIGHFS", "VHIGHCHM")
+
+
+def driver_keys() -> dict[str, frozenset[str]]:
+    """Legal ``driver_*`` field names per TMC family, from ``tmc_calc.py``.
+
+    Klipper calls ``set_config_field(config, name)`` once per field it knows
+    and aborts startup on any ``driver_`` option nobody read, so this table is
+    the single source of truth for what a section may carry.
+
+    >>> keys = driver_keys()
+    >>> sorted(keys)
+    ['tmc2209', 'tmc5160']
+    >>> "VHIGHFS" in keys["tmc5160"], "THIGH" in keys["tmc5160"]
+    (True, False)
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    try:
+        import tmc_calc  # noqa: PLC0415 - same-directory helper
+    except ImportError:
+        return {}
+    return tmc_calc.DRIVER_KEYS
+
+
+def driver_key_hint(field: str, family: str) -> str:
+    """Extra explanation for a few historical mistakes.
+
+    >>> driver_key_hint("THIGH", "tmc5160")[:24]
+    'THIGH is not a config op'
+    >>> driver_key_hint("XYZ", "tmc5160")
+    ''
+    """
+    if field == "THIGH":
+        return (
+            "THIGH is not a config option: the full-step threshold is the "
+            "first-class 'high_velocity_threshold' in mm/s and Klipper "
+            "computes THIGH from it."
+        )
+    return ""
+
+
+def tmc_flag_enabled(raw: str | None) -> bool:
+    """True when a 0/1 TMC option is switched on.
+
+    >>> [tmc_flag_enabled(v) for v in (None, "0", "1", " 1 ", "x")]
+    [False, False, True, True, False]
+    """
+    if raw is None:
+        return False
+    try:
+        return int(raw.split("#", 1)[0].strip(), 0) != 0
+    except ValueError:
+        return False
+
+
+def tmc_threshold(raw: str | None) -> float | None:
+    """Positive ``high_velocity_threshold`` in mm/s, or None.
+
+    Klipper defaults the option to 0 and skips the THIGH write for a falsy
+    value, so zero means "no threshold at all", not "switch at once".
+
+    >>> [tmc_threshold(v) for v in (None, "", "0", "700", " 700.5 ")]
+    [None, None, None, 700.0, 700.5]
+    >>> tmc_threshold("fast") is None
+    True
+    """
+    if raw is None:
+        return None
+    try:
+        value = float(raw.split("#", 1)[0].strip())
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 class Checker:
     def __init__(self) -> None:
         self.fileconfig = configparser.RawConfigParser(
@@ -739,6 +825,130 @@ class Checker:
                             "fix it with:\n  %s"
                             % (where, raw, tmc_fix_command(rel, section, machine))
                         )
+
+    def check_tmc_driver_keys(self, root: str) -> None:
+        """Reject ``driver_*`` options that the TMC module never reads.
+
+        Klipper reads one ``set_config_field()`` per legal field and treats an
+        unread option as a configuration error, so ``driver_THIGH: 40`` (the
+        common copy-paste for a full-step threshold) aborts startup with
+        ``Option 'driver_THIGH' is not valid in section 'tmc5160 stepper_x'``.
+        The legal fields per family come from ``tmc_calc.DRIVER_KEYS``.
+
+        The audit walks the source files like ``check_tmc_mode``: families
+        without a table in ``DRIVER_KEYS`` (``tmc2109`` in the historical
+        module name) are skipped rather than guessed.
+        """
+        keys = driver_keys()
+        if not keys:
+            self.notice(
+                "tmc-driver: tmc_calc.py is not next to this checker, so the "
+                "driver_* key audit was skipped"
+            )
+            return
+        seen: set[str] = set()
+        for path in tmc_audit_paths(root):
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            try:
+                text = self.read_file(path)
+            except OSError as exc:
+                self.warning("tmc-driver: cannot read %s: %s" % (path, exc))
+                continue
+            rel = _norm(_rel(path, root))
+            for section in scan_tmc_sections(text):
+                header = str(section["header"])
+                family = header.split(None, 1)[0].lower()
+                legal = keys.get(family)
+                if legal is None:
+                    continue
+                options = section["options"]
+                assert isinstance(options, dict)
+                for key in options:
+                    if not key.startswith("driver_"):
+                        continue
+                    field = key[len("driver_"):].upper()
+                    if field in legal:
+                        continue
+                    hint = driver_key_hint(field, family)
+                    canonical = "driver_" + field
+                    self.error(
+                        "tmc-driver: %s ([%s]) sets %s, which %s never reads; "
+                        "Klipper aborts startup with \"Option '%s' is not valid "
+                        "in section '%s'\"%s"
+                        % (
+                            rel,
+                            header,
+                            canonical,
+                            family,
+                            canonical,
+                            header,
+                            (". " + hint) if hint else "",
+                        )
+                    )
+
+    def check_tmc_fullstep(self) -> None:
+        """VHIGHFS/VHIGHCHM need a real ``high_velocity_threshold``.
+
+        Klipper leaves THIGH at 0 when the option is absent, and THIGH=0 means
+        "threshold exceeded at any speed":
+
+        * with ``driver_VHIGHFS`` every move runs in full step - 0.2 mm per
+          full step on a 40 mm / 200-step axis - so probing and the mesh are
+          quantized. This is an ERROR.
+        * with ``driver_VHIGHCHM`` the driver sits in the high-velocity chopper
+          mode permanently; upstream ``docs/TMC_Drivers.md`` calls mode changes
+          away from the configured one "poor and confusing" at low speed. This
+          is a WARNING because it does not change the step resolution.
+
+        The check reads the merged profile, not one file: the threshold may
+        live in a merge layer while the bits are in the catalog module.
+        """
+        keys = driver_keys()
+        for name in self.fileconfig.sections():
+            parts = name.split(None, 1)
+            if len(parts) < 2 or not TMC_HEADER_RE.match(parts[0].lower()):
+                continue
+            family = parts[0].lower()
+            legal = keys.get(family, frozenset())
+            if not any(field in legal for field in FULLSTEP_FIELDS):
+                continue
+            options = {
+                key.lower(): value for key, value in self.fileconfig.items(name)
+            }
+            fullstep = tmc_flag_enabled(options.get("driver_vhighfs"))
+            chopper = tmc_flag_enabled(options.get("driver_vhighchm"))
+            threshold = tmc_threshold(options.get("high_velocity_threshold"))
+            where = "[%s]" % name
+            if fullstep and threshold is None:
+                self.error(
+                    "tmc-fullstep: %s enables driver_VHIGHFS without a "
+                    "positive high_velocity_threshold, so THIGH stays 0 and "
+                    "every move runs in full step (0.2 mm per full step on a "
+                    "40 mm / 200-step axis): probing and the mesh would be "
+                    "quantized. Set 'high_velocity_threshold: <mm/s>' above "
+                    "the fastest measuring move (bed_mesh speed is 600 mm/s) "
+                    "or drop driver_VHIGHFS" % where
+                )
+            if chopper and threshold is None:
+                self.warning(
+                    "tmc-fullstep: %s enables driver_VHIGHCHM without a "
+                    "positive high_velocity_threshold, so THIGH stays 0 and "
+                    "the driver switches to the high-velocity chopper mode "
+                    "permanently; upstream documents such a mode change as "
+                    "\"poor and confusing\" at low speed. Set "
+                    "'high_velocity_threshold: <mm/s>' or drop "
+                    "driver_VHIGHCHM" % where
+                )
+            if threshold is not None and not (fullstep or chopper):
+                self.notice(
+                    "tmc-fullstep: %s sets high_velocity_threshold=%s but "
+                    "neither driver_VHIGHFS nor driver_VHIGHCHM is enabled, "
+                    "so THIGH has no effect"
+                    % (where, options.get("high_velocity_threshold", "").strip())
+                )
 
     @staticmethod
     def _machine_values(machine_conf: str | None) -> dict[str, str]:
@@ -1461,6 +1671,8 @@ def run_checks(
         checker.check_tmc_mode(
             config_dir, next((root[3] for root in roots if root[3]), None)
         )
+        checker.check_tmc_driver_keys(config_dir)
+        checker.check_tmc_fullstep()
         sys.stdout.write(checker.merged_text())
         checker.emit(stream=sys.stderr)
         return 1 if checker.errors else 0
@@ -1475,6 +1687,7 @@ def run_checks(
         checker.check_z_endstop()
         checker.check_machine_voltage(machine_conf)
         checker.check_mcu_references()
+        checker.check_tmc_fullstep()
         checker.emit(stream=sys.stdout)
         had_errors = had_errors or bool(checker.errors)
         all_included |= checker.included
@@ -1485,6 +1698,7 @@ def run_checks(
     orphan.check_tmc_mode(
         config_dir, next((root[3] for root in roots if root[3]), None)
     )
+    orphan.check_tmc_driver_keys(config_dir)
     orphan.emit(stream=sys.stdout)
     return 1 if (had_errors or orphan.errors) else 0
 

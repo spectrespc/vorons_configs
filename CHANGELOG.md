@@ -198,6 +198,81 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** `check_config.py` ловит поломки конфигурации TMC до деплоя.
+  Неизвестная опция `driver_*` — теперь **ERROR**: Klipper читает только
+  поля из `set_config_field()`, поэтому `driver_THIGH: 40` роняет старт с
+  `Option 'driver_THIGH' is not valid in section …`; легальный список берётся
+  из `DRIVER_KEYS` в `tmc_calc.py` (единый источник, без второй копии).
+  `driver_VHIGHFS: 1` без положительного `high_velocity_threshold` — **ERROR**
+  (при `THIGH=0` полный шаг включён на любой скорости, измерительные поездки
+  квантуются), `driver_VHIGHCHM: 1` без порога — **WARNING** (постоянный
+  высокоскоростной чоппер, upstream называет смену режима на низкой скорости
+  «poor and confusing»), порог без включённых битов — **NOTICE**. Проверки
+  читают смерженный профиль, поэтому порог в `machine-extras.cfg` и биты в
+  каталожном модуле не конфликтуют. `tmc_calc.py --selftest` дополнен кейсом:
+  `high_velocity_threshold` и `driver_VHIGHFS/CHM` переживают
+  `--update-module` и не попадают в предупреждения о неизвестных ключах.
+  **EN:** `check_config.py` now catches TMC configuration breakage before a
+  deploy. An unknown `driver_*` option is an **ERROR**: Klipper only reads
+  fields registered with `set_config_field()`, so `driver_THIGH: 40` aborts
+  startup with `Option 'driver_THIGH' is not valid in section …`; the legal
+  list comes from `DRIVER_KEYS` in `tmc_calc.py` (one source, no second copy).
+  `driver_VHIGHFS: 1` without a positive `high_velocity_threshold` is an
+  **ERROR** (`THIGH=0` means full step at any speed, so probing and mesh moves
+  get quantized), `driver_VHIGHCHM: 1` without a threshold is a **WARNING**
+  (permanent high-velocity chopper, which upstream calls "poor and confusing"
+  at low speed), and a threshold with neither bit enabled is a **NOTICE**. The
+  checks read the merged profile, so a threshold in `machine-extras.cfg` and
+  the bits in a catalog module do not conflict. `tmc_calc.py --selftest` gained
+  a case proving that `high_velocity_threshold` and `driver_VHIGHFS/CHM`
+  survive `--update-module` and are not reported as unknown keys.
+
+- **RU:** Полношаговый переход TMC5160 по скорости (THIGH/VHIGHFS/VHIGHCHM)
+  проверен на стенде v24-350 2026-11-22 и **не применён**. Механизм
+  подтверждён: `SET_TMC_FIELD FIELD=thigh VELOCITY=500` даёт `THIGH=19` на
+  обеих осях, биты `vhighfs`/`vhighchm` видны в `CHOPCONF`, `fsactive=1` — в
+  9 из 11 сэмплов `DRV_STATUS` в движении и ни разу во всех 11 сэмплах в
+  покое. Выигрыша нет: при 64 микрошагах базовая линия (`thigh=0`, биты 0)
+  проходит 750/8500, 900/9000 и 900/10000 в 3/3 без потерь (`|Δ| ≤ 35`
+  счётчиков МКУ, полный шаг — 64), вариант «только CHM» так же чист (9/9,
+  `|Δ| ≤ 31`), а гейт требует провала baseline. Во время C toolhead-MCU
+  `extruder` отвалился (за 1 с 6288 `rx_error` и 6333 `tx_retries`, затем
+  таймаут), шина при этом осталась жива; причина — отошедший разъём CAN/питания
+  на SHT36. После его посадки серия C/D повторена: C 9/9 чисто
+  (`|Δ| ≤ 10`), D 9/9, кроме одного прогона 750/8500 со сдвигом +515
+  счётчиков по одному мотору (то же редкое событие «~8 полных шагов», что и в
+  baseline, без ошибок CAN в этом окне). Дополнительно измерены скорости выше
+  1000 мм/с: 1000–1200 мм/с при ускорении 8500 проходят и в baseline, и в full
+  step, а 1100/10000 теряет ~8 полных шагов в обеих конфигурациях — выигрыша
+  нет; сам паттерн шагов не теряет (смещение появляется после финального
+  `G28`, то есть сдвигается привязка гоминга). Данные,
+  вывод «не применять» и предупреждение о том, что `INIT_TMC` не сбрасывает
+  `vhighfs`/`vhighchm` (только рестарт), записаны в
+  `printers/v24-350/machine-extras.cfg` и в README.
+  **EN:** The TMC5160 full-step switch on speed (THIGH/VHIGHFS/VHIGHCHM) was
+  tested on the v24-350 bench on 2026-11-22 and is **not applied**. The
+  mechanism is confirmed: `SET_TMC_FIELD FIELD=thigh VELOCITY=500` gives
+  `THIGH=19` on both axes, `vhighfs`/`vhighchm` show up in `CHOPCONF`, and
+  `fsactive=1` appeared in 9 of 11 `DRV_STATUS` samples during motion and in
+  none of the 11 standstill samples. There is no gain: at microsteps 64 the
+  baseline (`thigh=0`, both bits 0) passes 750/8500, 900/9000 and 900/10000
+  in 3/3 without loss (`|Δ| ≤ 35` MCU counts, one full step is 64), the
+  CHM-only variant is equally clean (9/9, `|Δ| ≤ 31`), and the gate requires a
+  baseline failure. During C the `extruder` toolhead MCU dropped out (6288
+  `rx_error` and 6333 `tx_retries` within one second, then a timeout) while the
+  bus itself stayed alive; the cause was the CAN/power connector on the SHT36
+  coming loose during the high-speed runs. After it was re-seated the C/D
+  series was repeated: C 9/9 clean (`|Δ| ≤ 10`), D 9/9 apart from one
+  750/8500 run with a +515 count shift on one motor (the same rare
+  ~8-full-step event seen in baseline, no CAN errors in that window).
+  Speeds above 1000 mm/s were measured too: 1000-1200 mm/s at accel 8500 pass
+  in both baseline and full step, 1100/10000 loses ~8 full steps in both, so
+  full step gives no gain; the pattern itself keeps its steps (the drift shows
+  up after the final `G28`, i.e. the homing reference shifts). The data, the "do not apply" conclusion
+  and the warning that `INIT_TMC` does not clear `vhighfs`/`vhighchm` (only a
+  restart does) are recorded in `printers/v24-350/machine-extras.cfg` and the
+  README.
+
 - **RU:** Лимиты `[printer]` подняты до рекомендованных значений для 64
   микрошагов: v24 — `max_velocity: 300 → 750`, `max_accel: 3000 → 8500`;
   trident — `max_velocity: 700 → 750`, `max_accel: 10000 → 8500`. Значения

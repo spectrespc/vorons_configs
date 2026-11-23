@@ -489,6 +489,24 @@ override — в его `machine-extras.cfg`), а `position_endstop` в его
   работает в SpreadCycle по умолчанию, но парковый инвариант требует явный `0`.
   Аудит обходит весь `std.configs/**` и `printers/*/local/**`, поэтому
   недосягаемый из `machine.conf` `boards/fly-sb2040.cfg` тоже проверяется.
+- **ERROR** — `driver_*`-опция, которую модуль этого семейства не читает
+  (`driver_THIGH` — типовой пример): Klipper падает на старте с
+  `Option 'driver_THIGH' is not valid in section 'tmc5160 stepper_x'`.
+  Легальный список берётся из `DRIVER_KEYS` в `tmc_calc.py`, второй копии нет;
+  для порога полношагового перехода есть `high_velocity_threshold` в мм/с, из
+  которого Klipper сам считает `THIGH`. Неизвестные семейства
+  (`[tmc2109 …]`) пропускаются, а не угадываются.
+- **ERROR** — `driver_VHIGHFS: 1` без положительного `high_velocity_threshold`:
+  `THIGH` остаётся `0`, то есть «порог превышен на любой скорости», и каждый
+  ход идёт в полный шаг (0.2 мм на полный шаг при 40 мм / 200 шагов) —
+  измерительные поездки и сетка квантуются. Сообщение требует порог выше
+  `[bed_mesh] speed`.
+- **WARNING** — `driver_VHIGHCHM: 1` без положительного
+  `high_velocity_threshold`: драйвер постоянно сидит в высокоскоростном
+  режиме чоппера; upstream `docs/TMC_Drivers.md` называет такую смену режима
+  при низкой скорости «poor and confusing».
+- **NOTICE** — `high_velocity_threshold` задан, но ни `driver_VHIGHFS`, ни
+  `driver_VHIGHCHM` не включены: регистр `THIGH` ни на что не влияет.
 - **ERROR** — `--jinja-lint`: тело любого `[gcode_macro]` из `std.macros/` и
   `printers/*/macros.cfg` не разбирается Jinja с разделителями Klipper
   (`{% %}` для блоков, `{ }` для вывода), то есть Klipper не загрузит конфиг.
@@ -733,6 +751,37 @@ python3 scripts/tmc_calc.py --update-module \
   `std.configs/**` и `printers/*/local/**`, включая недосягаемый из
   `machine.conf` `boards/fly-sb2040.cfg`; `bringup_tmc.py` отказывает на
   stealthchop-секции вместо тихого выбрасывания регистров.
+- Полношаговый переход по скорости задаётся **только** опцией
+  `high_velocity_threshold` (мм/с): по ней `tmc.TMCVhighHelper` считает
+  `THIGH = fCLK · rotation_distance / (full_steps_per_rotation · 256) / v`
+  (для v24-350 `9375 / v`, то есть 700 мм/с → `THIGH=13`). Ключа
+  `driver_THIGH` в Klipper нет — это ошибка старта, её ловит
+  `check_config.py`. `driver_VHIGHFS`/`driver_VHIGHCHM` — легальные биты
+  `CHOPCONF` (18 и 19), но без положительного порога они включают полный шаг
+  (FS) или высокоскоростной чоппер (CHM) навсегда; порог обязан быть выше
+  самой быстрой измерительной поездки (`[bed_mesh] speed`).
+- Полношаговый переход проверен на стенде v24-350 (2026-11-22) и **не
+  применён**. Механизм подтверждён: `thigh` с `VELOCITY=500` даёт `THIGH=19`,
+  биты `vhighfs`/`vhighchm` видны в `CHOPCONF`, `fsactive=1` в 9 из 11
+  сэмплов `DRV_STATUS` в движении и `0` во всех 11 сэмплах в покое. Но при
+  64 микрошагах базовая линия уже проходит 750/8500, 900/9000 и 900/10000
+  без потерь (3/3, `|Δ| ≤ 35` счётчиков МКУ, полный шаг — 64), а вариант
+  «только CHM» так же чист (9/9, `|Δ| ≤ 31`); гейт требует провала baseline,
+  которого нет. Прогон вариантов C/D был прерван отходом toolhead-MCU
+  `extruder` (за 1 с 6288 `rx_error` и 6333 `tx_retries`, затем
+  `Timeout on connect`; шина и USB-CAN мост остались живы). Причина найдена:
+  разъём CAN/питания на SHT36 отошёл на высокоскоростных прогонах; после
+  посадки разъёма серия C/D повторена: C 9/9 чисто (`|Δ| ≤ 10`), D 9/9,
+  кроме одного прогона 750/8500 со сдвигом +515 счётчиков по одному мотору —
+  то же редкое событие «~8 полных шагов», что и в baseline, без ошибок CAN в
+  этом окне. Отдельно проверены скорости выше 1000 мм/с: 1000–1200 мм/с с
+  ускорением 8500 проходят без потерь и у baseline, и у full step, а 1100/10000
+  теряет ~8 полных шагов у обеих конфигураций, то есть выигрыша нет. При этом
+  сам паттерн шагов не теряет: диагностика с парковкой на Z=30 даёт `0/0` по
+  паттерну, а смещение появляется только после финального `G28` — сдвигается
+  привязка гоминга (механика/ремни), а не траектория. Данные и
+  вывод записаны в `printers/v24-350/machine-extras.cfg`. Откат ручных
+  битов — только рестарт Klipper: `INIT_TMC` возвращает их из кэша полей.
 - X/Y и Z пересчитаны от пикового тока даташита в RMS (`--current-basis peak`,
   `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO 2.8 A peak → 1.9799 A RMS,
   17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS,
@@ -1628,6 +1677,24 @@ references against the original option text:
   SpreadCycle by default, but the fleet invariant wants an explicit `0`. The
   audit walks all of `std.configs/**` and `printers/*/local/**`, so
   `boards/fly-sb2040.cfg` (unreachable from `machine.conf`) is covered too.
+- **ERROR** — a `driver_*` option the module of that family never reads
+  (`driver_THIGH` is the common one): Klipper aborts startup with
+  `Option 'driver_THIGH' is not valid in section 'tmc5160 stepper_x'`. The
+  legal list comes from `DRIVER_KEYS` in `tmc_calc.py` with no second copy; the
+  full-step threshold is the first-class `high_velocity_threshold` in mm/s,
+  from which Klipper computes `THIGH`. Families without a table
+  (`[tmc2109 …]`) are skipped, not guessed.
+- **ERROR** — `driver_VHIGHFS: 1` without a positive
+  `high_velocity_threshold`: `THIGH` stays `0`, meaning "threshold exceeded at
+  any speed", so every move runs in full step (0.2 mm per full step on a
+  40 mm / 200-step axis) and probing/mesh data gets quantized. The message asks
+  for a threshold above `[bed_mesh] speed`.
+- **WARNING** — `driver_VHIGHCHM: 1` without a positive
+  `high_velocity_threshold`: the driver sits in the high-velocity chopper mode
+  permanently; upstream `docs/TMC_Drivers.md` calls such a mode change at low
+  speed "poor and confusing".
+- **NOTICE** — `high_velocity_threshold` is set but neither `driver_VHIGHFS`
+  nor `driver_VHIGHCHM` is enabled: `THIGH` has no effect.
 - **ERROR** — `--jinja-lint`: a `[gcode_macro]` body in `std.macros/` or
   `printers/*/macros.cfg` does not parse as Jinja with Klipper's delimiters
   (`{% %}` blocks, `{ }` output), i.e. Klipper would refuse to load the config.
@@ -1872,6 +1939,40 @@ Script rules:
   `printers/*/local/**`, including `boards/fly-sb2040.cfg`, which no
   `machine.conf` can reach. `bringup_tmc.py` refuses a StealthChop section
   instead of silently dropping the chopper registers.
+- The full-step switch on speed is configured **only** through
+  `high_velocity_threshold` (mm/s): `tmc.TMCVhighHelper` computes
+  `THIGH = fCLK · rotation_distance / (full_steps_per_rotation · 256) / v`
+  (for v24-350 that is `9375 / v`, so 700 mm/s gives `THIGH=13`). Klipper has
+  no `driver_THIGH` option - that is a startup error, caught by
+  `check_config.py`. `driver_VHIGHFS`/`driver_VHIGHCHM` are legal `CHOPCONF`
+  bits (18 and 19), but without a positive threshold they turn on full step
+  (FS) or the high-velocity chopper (CHM) permanently; the threshold must stay
+  above the fastest measuring move (`[bed_mesh] speed`).
+- The full-step switch was tested on the v24-350 bench (2026-11-22) and is
+  **not applied**. The mechanism is confirmed: `thigh` with `VELOCITY=500`
+  gives `THIGH=19`, the `vhighfs`/`vhighchm` bits show up in `CHOPCONF`, and
+  `fsactive=1` appeared in 9 of 11 `DRV_STATUS` samples taken during motion
+  and in none of the 11 standstill samples. At microsteps 64, however, the
+  baseline already passes 750/8500, 900/9000 and 900/10000 without loss (3/3,
+  `|Δ| ≤ 35` MCU counts, one full step is 64) and the CHM-only variant is
+  equally clean (9/9, `|Δ| ≤ 31`); the gate requires a baseline failure that
+  does not exist. The C/D variants were cut short by the `extruder` toolhead
+  MCU dropping out (6288 `rx_error` and 6333 `tx_retries` within one second,
+  then `Timeout on connect`; the bus and the USB-CAN bridge stayed alive). The
+  cause was found: the CAN/power connector on the SHT36 came loose during the
+  high-speed runs, and the C/D series was repeated after it was re-seated:
+  C 9/9 clean (`|Δ| ≤ 10`), D 9/9 apart from one 750/8500 run with a +515
+  count shift on one motor - the same rare ~8-full-step event seen in the
+  baseline, with no CAN errors in that window. Speeds above 1000 mm/s were
+  checked separately: 1000-1200 mm/s at accel 8500 pass without loss in both
+  the baseline and the full-step configuration, while 1100/10000 loses ~8 full
+  steps in both, so there is no gain. The pattern itself keeps its steps: a
+  diagnostic that parked at Z=30 on both sides reported `0/0` for the pattern,
+  and the drift appeared only after the final `G28`, i.e. the homing reference
+  shifts (gantry/belts), not the path. The
+  data and the conclusion live in `printers/v24-350/machine-extras.cfg`.
+  Hand-set bits can only be cleared by a Klipper restart: `INIT_TMC` writes
+  the cached field values back.
 - X/Y and Z are recalculated from the datasheet peak into RMS
   (`--current-basis peak`, `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO
   2.8 A peak → 1.9799 A RMS, 17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S
