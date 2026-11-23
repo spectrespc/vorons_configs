@@ -198,6 +198,46 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** Ревью `klipper_tmc_autotune` и замер огибающей +50 % на v24-350
+  (2026-11-23). Модуль в парк **не берём**: он переписывает посчитанные
+  `tmc_calc.py` регистры поверх конфига на `klippy:ready`, включает
+  StealthChop/`interpolate: true`/CoolStep для Z и экструдера (конфликт с
+  парковыми инвариантами) и сам держит `VHIGHFS`/`VHIGHCHM` выключенными.
+  Из него взята только сверка констант: `ldo-42sth48-2804ah` в его
+  `motor_database.cfg` = 0.7 Ом / 0.6 мГн / 2.8 А / 0.42 Н·м, что совпадает
+  с `docs/tmc/motors.json`; поэтому мотор парка переименован в
+  `LDO-42STH48-2804AH-R` без пересчёта токов и чоппера (обновлены каталожные
+  модули `manta-m5p`/`manta-m8p`, ключ `motors.json`, профиль v24-350,
+  скрипты и документация; исторические записи CHANGELOG не переписаны).
+  Серия +50 % от применённых 750/8500 (1125 мм/с, 12750 мм/с²) на чистом
+  baseline: 1125/12750 — 3/3 pass (`|Δ| ≤ 7`), 1000/12750 — 2/3 fail,
+  1125/8500 — 1/3 fail, 1125/10000 — 3/3 fail (`|Δ|` до 505 счётчиков МКУ,
+  полный шаг 64). `diag4` на провальных клетках дал `patterns 0/0` и сдвиг
+  `rehome` ±512 (8 полных шагов): уезжает привязка гоминга после прогона,
+  паттерн шаги не теряет. `LOST_STEPS` = 0, TMC 54.9–56.0 °C, CAN
+  `bus_state=active` без `rx_error`/`tx_error`. Лимиты `[printer] 750/8500`
+  не меняются: монотонно пройденной клетки выше 1125/8500 нет.
+  **EN:** Review of `klipper_tmc_autotune` and the +50 % envelope measurement
+  on the v24-350 bench (2026-11-23). The module is **not adopted**: it
+  overwrites the `tmc_calc.py` registers on `klippy:ready`, enables
+  StealthChop/`interpolate: true`/CoolStep for Z and the extruder (a conflict
+  with the fleet invariants), and itself keeps `VHIGHFS`/`VHIGHCHM` off. Only
+  its constant cross-check is used: `ldo-42sth48-2804ah` in
+  `motor_database.cfg` is 0.7 Ohm / 0.6 mH / 2.8 A / 0.42 Nm, matching
+  `docs/tmc/motors.json`, so the fleet motor is renamed to
+  `LDO-42STH48-2804AH-R` with no current or chopper recalculation (catalog
+  modules under `manta-m5p`/`manta-m8p`, the `motors.json` key, the v24-350
+  profile, scripts and docs are updated; historical CHANGELOG records are left
+  untouched). The +50 % series over the applied 750/8500 (1125 mm/s,
+  12750 mm/s^2) on the pure baseline: 1125/12750 passed 3/3 (`|Δ| ≤ 7`),
+  1000/12750 failed 2/3, 1125/8500 failed 1/3, 1125/10000 failed 3/3
+  (`|Δ|` up to 505 MCU counts, one full step is 64). `diag4` on the failing
+  cells reported `patterns 0/0` and a `rehome` shift of ±512 (8 full steps):
+  the homing reference moves after the run, the pattern keeps its steps.
+  `LOST_STEPS` was 0, TMC temperature 54.9-56.0 C, CAN `bus_state=active`
+  with no `rx_error`/`tx_error`. The `[printer] 750/8500` limits stay: there
+  is no monotonically passed cell above 1125/8500.
+
 - **RU:** `check_config.py` ловит поломки конфигурации TMC до деплоя.
   Неизвестная опция `driver_*` — теперь **ERROR**: Klipper читает только
   поля из `set_config_field()`, поэтому `driver_THIGH: 40` роняет старт с

@@ -782,6 +782,33 @@ python3 scripts/tmc_calc.py --update-module \
   привязка гоминга (механика/ремни), а не траектория. Данные и
   вывод записаны в `printers/v24-350/machine-extras.cfg`. Откат ручных
   битов — только рестарт Klipper: `INIT_TMC` возвращает их из кэша полей.
+- `klipper_tmc_autotune` (`andrewmcgr`, GPL-3.0) в парк **не берём**. Это
+  рантайм-оверрайдёр: на `klippy:ready` и по `AUTOTUNE_TMC` он пересчитывает
+  CHOPCONF, PWMCONF, COOLCONF, TPWMTHRS, TCOOLTHRS и THIGH поверх конфига,
+  поэтому каталожные модули `tmc_calc.py` и железо расходятся молча. Для Z и
+  экструдера режим `auto` включает StealthChop (сброс `CHM`), требует
+  `interpolate: true` и CoolStep (`semin=2, semax=4`) — прямые конфликты с
+  `stealthchop_threshold: 0`, `interpolate: false` и «без COOLCONF». Наконец,
+  сам модуль держит `VHIGHFS = VHIGHCHM = False` и считает порог FS от
+  `1.2 × vmaxpwm` StealthChop, что к SpreadCycle-парку неприменимо. Полезен
+  только `motor_database.cfg` как второй источник констант: запись
+  `ldo-42sth48-2804ah` = 0.7 Ом / 0.6 мГн / 2.8 А / 0.42 Н·м совпадает с
+  `docs/tmc/motors.json`, поэтому мотор парка переименован в
+  `LDO-42STH48-2804AH-R` без пересчёта токов. Код autotune в репозиторий не
+  копируется (GPL-3.0), только факты и ссылка.
+- Огибающая +50 % от применённых 750/8500 (1125 мм/с, 12750 мм/с²) измерена
+  на v24-350 2026-11-23 на чистом baseline (A: `thigh=0`, оба бита 0, без
+  VHIGH-опций). Клетка 1125/12750 прошла 3/3 (`|Δ| ≤ 7` счётчиков МКУ,
+  полный шаг — 64), но 1000/12750 провалилась 2/3, 1125/8500 — 1/3,
+  1125/10000 — 3/3 (`|Δ|` до 505); провалы не монотонны по ускорению.
+  Диагностика `diag4` с парковкой Z=30 на провальных клетках дала
+  `patterns 0/0` во всех прогонах и сдвиг `rehome` ±512 счётчиков (8 полных
+  шагов): после прогона уезжает привязка гоминга, а не теряется шаг в
+  паттерне. `LOST_STEPS` = 0, температура TMC 54.9–56.0 °C, toolhead-MCU
+  остался `bus_state=active` без `rx_error`/`tx_error` (росли только
+  накопительные `tx_retries`). Поэтому `[printer] 750/8500` не поднимаются:
+  правило запаса 15 % берётся от монотонно пройденной клетки, а её выше
+  1125/8500 нет.
 - X/Y и Z пересчитаны от пикового тока даташита в RMS (`--current-basis peak`,
   `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO 2.8 A peak → 1.9799 A RMS,
   17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS,
@@ -1973,6 +2000,34 @@ Script rules:
   data and the conclusion live in `printers/v24-350/machine-extras.cfg`.
   Hand-set bits can only be cleared by a Klipper restart: `INIT_TMC` writes
   the cached field values back.
+- `klipper_tmc_autotune` (`andrewmcgr`, GPL-3.0) is **not adopted**. It is a
+  runtime override: on `klippy:ready` and on `AUTOTUNE_TMC` it recalculates
+  CHOPCONF, PWMCONF, COOLCONF, TPWMTHRS, TCOOLTHRS and THIGH over the config,
+  so the `tmc_calc.py` catalog modules and the hardware silently diverge. For
+  Z and the extruder the `auto` target enables StealthChop (clears `CHM`),
+  requires `interpolate: true` and turns on CoolStep (`semin=2, semax=4`) -
+  direct conflicts with `stealthchop_threshold: 0`, `interpolate: false` and
+  the "no COOLCONF" invariant. Finally, the module itself keeps
+  `VHIGHFS = VHIGHCHM = False` and derives the FS threshold from
+  `1.2 × vmaxpwm` of StealthChop, which does not apply to the SpreadCycle
+  fleet. Only `motor_database.cfg` is useful, as a second source of constants:
+  `ldo-42sth48-2804ah` = 0.7 Ohm / 0.6 mH / 2.8 A / 0.42 Nm matches
+  `docs/tmc/motors.json`, so the fleet motor is renamed to
+  `LDO-42STH48-2804AH-R` with no current recalculation. No autotune code is
+  copied into this repository (GPL-3.0), only facts and the reference.
+- The +50 % envelope over the applied 750/8500 (1125 mm/s, 12750 mm/s^2) was
+  measured on the v24-350 bench on 2026-11-23 on the pure baseline (A:
+  `thigh=0`, both bits 0, no VHIGH options). The 1125/12750 cell passed 3/3
+  (`|Δ| ≤ 7` MCU counts, one full step is 64), but 1000/12750 failed 2/3,
+  1125/8500 failed 1/3 and 1125/10000 failed 3/3 (`|Δ|` up to 505); the
+  failures are not monotonic in acceleration. A `diag4` run that parked at
+  Z=30 on the failing cells reported `patterns 0/0` every time and a `rehome`
+  shift of ±512 counts (8 full steps): the homing reference moves after the
+  run, the pattern itself keeps its steps. `LOST_STEPS` stayed 0, the TMC
+  temperature was 54.9-56.0 C, and the toolhead MCU stayed `bus_state=active`
+  with no `rx_error`/`tx_error` (only the cumulative `tx_retries` grew). The
+  `[printer] 750/8500` limits therefore stay: the 15 % margin rule is taken
+  from a monotonically passed cell, and there is none above 1125/8500.
 - X/Y and Z are recalculated from the datasheet peak into RMS
   (`--current-basis peak`, `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO
   2.8 A peak → 1.9799 A RMS, 17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S
