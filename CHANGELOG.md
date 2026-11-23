@@ -198,6 +198,25 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** `[input_shaper]` стенда v24-350 перекалиброван по методике Klipper
+  Measuring Resonances (2026-11-23, lis2dw на sht36-v3, `axes_map: -y,z,-x`):
+  X 71.0 Гц `ei` → 51.2 Гц `mzv` (пик 50 Гц в `psd_x`, остаточные вибрации
+  0.4 %, сглаживание 0.078), Y 64.0 Гц `2hump_ei` → 35.2 Гц `mzv` (пик 34 Гц
+  в `psd_y`, 0.0 %, 0.164). Старые значения были сняты до перевода X/Y на
+  TMC5160 и не соответствуют текущей механике; `max_accel: 8500` оставлен
+  без изменений (при mzv 35.2 Гц Klipper советует не выше 3700 — это осознанный
+  компромисс по скорости). Значения лежат в
+  `printers/v24-350/local/input.shaper.cfg`, `SAVE_CONFIG` не используется.
+  **EN:** The v24-350 bench `[input_shaper]` was recalibrated with Klipper's
+  Measuring Resonances procedure (2026-11-23, lis2dw on sht36-v3,
+  `axes_map: -y,z,-x`): X 71.0 Hz `ei` → 51.2 Hz `mzv` (50 Hz peak in
+  `psd_x`, 0.4 % residual vibrations, 0.078 smoothing), Y 64.0 Hz `2hump_ei`
+  → 35.2 Hz `mzv` (34 Hz peak in `psd_y`, 0.0 %, 0.164). The old values were
+  taken before X/Y moved to TMC5160 and no longer match the mechanics;
+  `max_accel: 8500` is intentionally unchanged (at mzv 35.2 Hz Klipper
+  suggests no more than 3700). The values live in
+  `printers/v24-350/local/input.shaper.cfg`, `SAVE_CONFIG` is not used.
+
 - **RU:** Лестница +15 % (750/8500 → 1500/15000) на v24-350 (2026-11-23,
   baseline A, без VHIGH, 3 повтора на клетку, критерий 0.1 мм: 32 счётчика
   при 64 микрошагах, 64 при 128). При 64 критерий держит только стартовая
@@ -594,6 +613,27 @@ Every entry is provided in Russian and English.
   command line.
 
 ### Fixed / Исправлено
+
+- **RU:** `std.configs/extruder/accel/lis2dw.cfg`: неверный `axes_map: x,z,-y`
+  вешал вертикальную ось чипа на ось X принтера, поэтому замер `TEST_RESONANCES
+  AXIS=X` писал в `psd_x` поперечную компоненту, а реальный пик X уходил в
+  `psd_z`. На стенде v24-350 (sht36-v3) проверено 2026-11-23:
+  `ACCELEROMETER_QUERY` на неподвижной машине с новым `axes_map: -y,z,-x`
+  даёт `z=+9475 mm/s²` (весь вектор тяжести в Z), ход +X даёт отклик только в
+  `x`, ход +Y — только в `y`. После исправления шум 2.23/2.16/2.14 и
+  воспроизводимые пики 50 Гц (X) и 34 Гц (Y). `boards/ebb36-v1.2.cfg` с тем же
+  значением не тронут: другая плата и другая посадка чипа, на железе не
+  проверялась.
+  **EN:** `std.configs/extruder/accel/lis2dw.cfg`: the wrong
+  `axes_map: x,z,-y` attached the chip's vertical axis to the printer X axis,
+  so `TEST_RESONANCES AXIS=X` wrote the transverse component into `psd_x`
+  while the real X peak landed in `psd_z`. Verified on the v24-350 bench
+  (sht36-v3) on 2026-11-23: `ACCELEROMETER_QUERY` on a stationary machine
+  with the new `axes_map: -y,z,-x` reports `z=+9475 mm/s²` (the whole gravity
+  vector in Z), a +X move responds only in `x`, and a +Y move only in `y`.
+  After the fix the noise is 2.23/2.16/2.14 and the peaks are reproducible
+  at 50 Hz (X) and 34 Hz (Y). `boards/ebb36-v1.2.cfg` with the same value is
+  untouched: different board and chip mount, not verified on hardware.
 
 - **RU:** `[probe] pin: !SENS_2` был объявлен в файлах всех четырёх плат Manta,
   а не только в `std.configs/probe.cfg`. Файл платы включается безусловно,

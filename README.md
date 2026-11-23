@@ -1096,6 +1096,44 @@ Klipper. Грязный клон (`git status` не пуст) Moonraker обно
   `secrets/` (кроме `hosts.env.example`), а поиск по истории
   (`git log -p`) не находит пароль.
 
+### Калибровка input shaper (Measuring Resonances)
+
+Методика Klipper [Measuring Resonances](https://www.klipper3d.org/Measuring_Resonances.html)
+на живом стенде. Результат пишется в `printers/<id>/local/input.shaper.cfg`
+и коммитится: репозиторий остаётся source of truth, `SAVE_CONFIG` не используется.
+
+Что нужно заранее:
+
+- в `klippy-env` установлен `numpy` — без него `MEASURE_AXES_NOISE` и
+  `TEST_RESONANCES` падают с `Failed to import numpy module`:
+  `~/klippy-env/bin/pip install numpy`;
+- акселерометр закреплён на toolhead, стол и сопло свободны, прошивка
+  содержит trsync-патч (см. «Известные патчи Klipper»);
+- графики строятся не на хосте, а на рабочей машине: `~/klipper/scripts/calibrate_shaper.py`
+  и `graph_accelerometer.py` требуют `numpy`, `scipy` и `matplotlib`.
+
+```bash
+API="python3 ~/vorons_configs/scripts/lib/bringup_api.py"
+$API gcode G28
+$API --timeout 120 gcode MEASURE_AXES_NOISE      # ориентир lis2dw: < 10
+$API --timeout 880 gcode 'TEST_RESONANCES AXIS=X'   # ~6 мин
+$API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
+# CSV лежит на хосте в /tmp/resonances_<ось>_<дата>.csv
+scp spectre@<host>:/tmp/resonances_x_*.csv .
+python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
+```
+
+Одну ось нельзя запускать, пока идёт предыдущий тест: команда синхронная,
+между ними достаточно `wait-idle --timeout 900`. Пик ищется в `psd_x` для X и
+в `psd_y` для Y; `calibrate_shaper.py` подбирает `shaper_freq_*` и
+`shaper_type_*` с оценкой остаточных вибраций и сглаживания.
+
+Ориентация датчика проверяется до первого замера: на неподвижном принтере
+`ACCELEROMETER_QUERY` должен показывать весь вектор тяжести в Z
+(`z≈+9475 mm/s²` для lis2dw при `axes_map: -y,z,-x`), ход +X — отклик только
+в `x`, ход +Y — только в `y`. Иначе замер молча пишется не в те оси (так было
+на v24-350 с прежним `axes_map: x,z,-y`: вертикаль висела на X).
+
 ### Известные патчи Klipper и настройка CAN-хоста
 
 Конфиги репозитория этих правок не содержат — они применяются на самом хосте
@@ -2340,6 +2378,48 @@ the changes first.
 - Leak check after commits: `git status --short` does not list `secrets/`
   (except `hosts.env.example`), and a history search (`git log -p`) does not
   find the password.
+
+### Input shaper calibration (Measuring Resonances)
+
+Klipper's [Measuring Resonances](https://www.klipper3d.org/Measuring_Resonances.html)
+procedure on a live bench. The result goes into
+`printers/<id>/local/input.shaper.cfg` and is committed: the repository stays
+the source of truth and `SAVE_CONFIG` is not used.
+
+Prerequisites:
+
+- `numpy` is installed in `klippy-env`, otherwise `MEASURE_AXES_NOISE` and
+  `TEST_RESONANCES` fail with `Failed to import numpy module`:
+  `~/klippy-env/bin/pip install numpy`;
+- the accelerometer is mounted on the toolhead, the bed and nozzle are clear,
+  and the firmware carries the trsync patch (see "Known Klipper patches");
+- graphs are rendered on the workstation, not on the host:
+  `~/klipper/scripts/calibrate_shaper.py` and `graph_accelerometer.py` need
+  `numpy`, `scipy` and `matplotlib`.
+
+```bash
+API="python3 ~/vorons_configs/scripts/lib/bringup_api.py"
+$API gcode G28
+$API --timeout 120 gcode MEASURE_AXES_NOISE      # lis2dw target: < 10
+$API --timeout 880 gcode 'TEST_RESONANCES AXIS=X'   # ~6 min
+$API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
+# the CSV lands on the host in /tmp/resonances_<axis>_<date>.csv
+scp spectre@<host>:/tmp/resonances_x_*.csv .
+python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
+```
+
+Never start the second axis while the first test is running: the command is
+synchronous, so `wait-idle --timeout 900` between them is enough. Look for the
+peak in `psd_x` for X and in `psd_y` for Y; `calibrate_shaper.py` picks
+`shaper_freq_*` and `shaper_type_*` with residual vibration and smoothing
+estimates.
+
+Check the sensor orientation before the first measurement: with the printer
+stationary `ACCELEROMETER_QUERY` must report the whole gravity vector in Z
+(`z≈+9475 mm/s²` for the lis2dw with `axes_map: -y,z,-x`), a +X move must
+respond only in `x`, and a +Y move only in `y`. Otherwise the measurement is
+silently written to the wrong axes (this happened on v24-350 with the old
+`axes_map: x,z,-y`, which attached the vertical axis to X).
 
 ### Known Klipper patches and CAN host setup
 
