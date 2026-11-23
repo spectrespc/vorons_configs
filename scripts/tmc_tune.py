@@ -420,8 +420,8 @@ def tmc_calc_settings(
 def motor_for_driver(machine: dict[str, str]) -> str:
     """X/Y motor named by machine.conf.
 
-    >>> motor_for_driver({"xy_motor": "LDO-42STH48-2804AC"})
-    'LDO-42STH48-2804AC'
+    >>> motor_for_driver({"xy_motor": "LDO-42STH48-2804AH-R"})
+    'LDO-42STH48-2804AH-R'
     """
     motor = machine.get("xy_motor")
     if not motor:

@@ -48,7 +48,7 @@ Optional:
       --xy-step V     0.9 only for 150 mm, 1.8 for larger machines
                       (default: 0.9 at 150, 1.8 otherwise)
       --xy-motor NAME motor key from docs/tmc/motors.json for X/Y
-                      (default follows xy-step: 17HM19-1684 / LDO-42STH48-2804AC)
+                      (default follows xy-step: 17HM19-1684 / LDO-42STH48-2804AH-R)
       --xy-driver IC  X/Y driver IC: tmc5160 (default) or tmc2209
       --z-driver IC   Z driver IC (default: tmc2109 for trident, tmc2209 for v24)
       --z-motor NAME  Z motor key from docs/tmc/motors.json
@@ -117,7 +117,7 @@ case "$MODEL" in
 esac
 
 # Only the 150 mm machine uses 0.9 degree X/Y motors; the rest of the fleet
-# uses LDO-42STH48-2804AC (1.8 degree) on TMC5160.
+# uses LDO-42STH48-2804AH-R (1.8 degree) on TMC5160.
 if [[ -z "$XY_STEP" ]]; then
   if [[ "$SIZE" == "150" ]]; then XY_STEP="0.9"; else XY_STEP="1.8"; fi
 fi
@@ -125,7 +125,7 @@ if [[ -z "$XY_MOTOR" ]]; then
   if [[ "$XY_STEP" == "0.9" ]]; then
     XY_MOTOR="17HM19-1684"
   else
-    XY_MOTOR="LDO-42STH48-2804AC"
+    XY_MOTOR="LDO-42STH48-2804AH-R"
   fi
 fi
 if [[ -z "$XY_DRIVER" ]]; then XY_DRIVER="tmc5160"; fi

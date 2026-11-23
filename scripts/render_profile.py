@@ -133,16 +133,16 @@ def discover_xy_pairs() -> tuple[tuple[str, str], ...]:
 
 XY_PAIRS = discover_xy_pairs() or (
     ("tmc5160", "17HM19-1684"),
-    ("tmc5160", "LDO-42STH48-2804AC"),
+    ("tmc5160", "LDO-42STH48-2804AH-R"),
 )
 
 DEFAULT_BOARD = {"trident": "manta-m5p", "v24": "manta-m8p"}
 # Fleet rule: only the 150 mm machine uses the 0.9 degree motors.  All other
-# sizes use LDO-42STH48-2804AC (1.8 degree) on TMC5160.
+# sizes use LDO-42STH48-2804AH-R (1.8 degree) on TMC5160.
 DEFAULT_XY_STEP = {"150": "0.9"}
 DEFAULT_XY_MOTOR = {
     "0.9": "17HM19-1684",
-    "1.8": "LDO-42STH48-2804AC",
+    "1.8": "LDO-42STH48-2804AH-R",
 }
 DEFAULT_XY_DRIVER = "tmc5160"
 

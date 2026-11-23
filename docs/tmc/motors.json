@@ -1,11 +1,11 @@
 {
-  "LDO-42STH48-2804AC": {
+  "LDO-42STH48-2804AH-R": {
     "rated_current_a": 2.8,
     "inductance_mh": 0.6,
     "resistance_ohm": 0.7,
     "step_angle_deg": 1.8,
     "holding_torque_ncm": 42,
-    "source": "https://ldomotion.com/products/ldo42sth482804ac",
+    "source": "https://ldomotion.com/products/ldo42sth482804ah-r",
     "note": "LDO Motion, NEMA 17, 48 mm, dual shaft. Даташит: 2.8 A/фаза, 0.7 Ом, 0.6 мГн (парк — X/Y на 1.8°)"
   },
   "17HM19-1684": {
@@ -37,7 +37,7 @@
   },
   "motor_by_module": {
     "tmc5160-17hm19-1684": "17HM19-1684",
-    "tmc5160-ldo-42sth48-2804ac": "LDO-42STH48-2804AC",
+    "tmc5160-ldo-42sth48-2804ah-r": "LDO-42STH48-2804AH-R",
     "tmc2209-17hm19-1684": "17HM19-1684",
     "tmc2109-17hs4401s": "17HS4401S",
     "tmc2209-17hs4401s": "17HS4401S",

@@ -21,7 +21,7 @@
 | `leveling` | `z_tilt`, `quad_gantry_level` | выравнивание стола; сверяется с `model` |
 | `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | основная плата |
 | `xy_step` | `0.9`, `1.8` | шаг двигателей X/Y: `0.9` только для 150; сверяется с мотором |
-| `xy_motor` | ключ из `docs/tmc/motors.json` | мотор X/Y: `17HM19-1684` (0.9°) или `LDO-42STH48-2804AC` (1.8°) |
+| `xy_motor` | ключ из `docs/tmc/motors.json` | мотор X/Y: `17HM19-1684` (0.9°) или `LDO-42STH48-2804AH-R` (1.8°) |
 | `xy_driver` | `tmc5160`, `tmc2209` | микросхема драйвера X/Y; модуль `xy-<driver>-<motor>.cfg` должен быть в обеих семьях плат |
 | `z_motor` | ключ из `docs/tmc/motors.json` | мотор Z (парк: `17HS4401S`; v24 от 250 мм — `17HS19-2004S1`) |
 | `z_driver` | `tmc2109`, `tmc2209` | микросхема драйвера Z; модуль `<z_count>z-<driver>-<motor>.cfg` |
@@ -64,7 +64,7 @@ z_leg_measured=245
 ```
 
 Правило парка: только 150×150 использует TMC5160 + 17HM19-1684 (0.9°);
-все остальные размеры — TMC5160 + LDO-42STH48-2804AC (1.8°, 42 Н·см,
+все остальные размеры — TMC5160 + LDO-42STH48-2804AH-R (1.8°, 42 Н·см,
 2.8 А пик → `run_current: 1.9799` RMS). TMC5160 работает в SpreadCycle
 (`stealthchop_threshold: 0`), SPI 1 МГц, `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD =
 0/3/7/15/1/2`. Z: `17HS4401S` (1.7 А пик → 1.2021 А RMS) на trident и v24
@@ -685,7 +685,7 @@ python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
     --r-ohm 1.5 --vm 24 --section stepper_z --section stepper_z1
 
 # StealthChop вместо SpreadCycle; PWM_OFS/GRAD — из PWM_AUTO после автотюнинга
-python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
+python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AH-R \
     --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
 
 # записать модуль и прописать пару xy_driver+xy_motor в профиль
@@ -1209,7 +1209,7 @@ guide live in [`docs/PROFILES.md`](docs/PROFILES.md) (Russian).
 | `leveling` | `z_tilt`, `quad_gantry_level` | bed levelling; must match `model` |
 | `board` | `manta-m5p`, `manta-m8p` (V2.0), `manta-m8p-v1.0`, `manta-m8p-v1.1` | main board |
 | `xy_step` | `0.9`, `1.8` | X/Y step angle: `0.9` only at 150 mm; checked against the motor |
-| `xy_motor` | key of `docs/tmc/motors.json` | X/Y motor: `17HM19-1684` (0.9°) or `LDO-42STH48-2804AC` (1.8°) |
+| `xy_motor` | key of `docs/tmc/motors.json` | X/Y motor: `17HM19-1684` (0.9°) or `LDO-42STH48-2804AH-R` (1.8°) |
 | `xy_driver` | `tmc5160`, `tmc2209` | X/Y driver IC; `xy-<driver>-<motor>.cfg` must exist in both board families |
 | `z_motor` | key of `docs/tmc/motors.json` | Z motor (fleet: `17HS4401S`; v24 250+ — `17HS19-2004S1`) |
 | `z_driver` | `tmc2109`, `tmc2209` | Z driver IC; `<z_count>z-<driver>-<motor>.cfg` |
@@ -1252,7 +1252,7 @@ z_leg_measured=245
 ```
 
 Fleet rule: only 150x150 uses TMC5160 + 17HM19-1684 (0.9 degree);
-every other size uses TMC5160 + LDO-42STH48-2804AC (1.8 degree, 42 Ncm,
+every other size uses TMC5160 + LDO-42STH48-2804AH-R (1.8 degree, 42 Ncm,
 2.8 A peak -> `run_current: 1.9799` RMS). TMC5160 runs in SpreadCycle
 (`stealthchop_threshold: 0`), SPI at 1 MHz, with
 `driver_TBL/TOFF/HSTRT/HEND/FD3/TPFD = 0/3/7/15/1/2`. Z: `17HS4401S`
@@ -1870,7 +1870,7 @@ python3 scripts/tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 \
     --r-ohm 1.5 --vm 24 --section stepper_z --section stepper_z1
 
 # StealthChop instead of SpreadCycle; PWM_OFS/GRAD from PWM_AUTO after autotuning
-python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC \
+python3 scripts/tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AH-R \
     --vm 48 --mode stealthchop --pwm-ofs 30 --pwm-grad 14
 
 # write the module and set the xy_driver+xy_motor pair in the profile

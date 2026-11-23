@@ -15,7 +15,7 @@ Usage:
               --section stepper_z --section stepper_z1
   tmc_calc.py --driver tmc2209 --motor MOONS-CSE14HRA1L410A-01 --vm 24 \\
               --run-current 0.55 --tbl 0 --toff 3
-  tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC --vm 48 --json
+  tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AH-R --vm 48 --json
   tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 --mode stealthchop
   tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24 --sgt -10 --json
   tmc_calc.py --list-motors
@@ -536,7 +536,7 @@ def selftest_update() -> int:
         "driver_VHIGHCHM: 1\n"
     )
     fullstep_args = build_parser().parse_args(
-        ["--vm", "48", "--motor", "LDO-42STH48-2804AC", "--i-factor", "1.0",
+        ["--vm", "48", "--motor", "LDO-42STH48-2804AH-R", "--i-factor", "1.0",
          "--update-module", "fixture.cfg", "--sections", "stepper_x"]
     )
     eighth, fullstep_report = update_module_text(fullstep, fullstep_args, motors)
@@ -656,8 +656,8 @@ def load_module_map(path: str) -> dict[str, str]:
 def motor_module_name(motor: str) -> str:
     """Conventional file stem for a motor: keep the vendor casing.
 
-    >>> motor_module_name("LDO-42STH48-2804AC")
-    'LDO-42STH48-2804AC'
+    >>> motor_module_name("LDO-42STH48-2804AH-R")
+    'LDO-42STH48-2804AH-R'
     """
     return re.sub(r"[^A-Za-z0-9._-]+", "-", motor).strip("-")
 
@@ -1229,7 +1229,7 @@ def module_motor(module_stem: str, module_map: dict[str, str]) -> str | None:
 
     >>> module_motor("3z-tmc2109-17hs4401s", {"tmc2109-17hs4401s": "17HS4401S"})
     '17HS4401S'
-    >>> module_motor("xy-tmc5160-LDO-42STH48-2804AC", {"tmc5160-ldo-42sth48-2804ac": "x"})
+    >>> module_motor("xy-tmc5160-LDO-42STH48-2804AH-R", {"tmc5160-ldo-42sth48-2804ah-r": "x"})
     'x'
     >>> module_motor("unknown", {}) is None
     True
@@ -1534,8 +1534,8 @@ def write_module(path: str, text: str, force: bool) -> str:
 def module_xy_pair(path: str) -> tuple[str, str]:
     """(driver, motor) of an ``xy-<driver>-<motor>.cfg`` module path.
 
-    >>> module_xy_pair("manta-m8p/xy-tmc5160-LDO-42STH48-2804AC.cfg")
-    ('tmc5160', 'LDO-42STH48-2804AC')
+    >>> module_xy_pair("manta-m8p/xy-tmc5160-LDO-42STH48-2804AH-R.cfg")
+    ('tmc5160', 'LDO-42STH48-2804AH-R')
     >>> module_xy_pair("manta-m5p/xy-tmc2209-17HM19-1684.cfg")
     ('tmc2209', '17HM19-1684')
     """
@@ -1748,8 +1748,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  tmc_calc.py --driver tmc5160 --motor 17HM19-1684 --vm 24\n"
             "  tmc_calc.py --driver tmc2209 --i-rated 1.7 --l-mh 2.8 --r-ohm 1.5 "
             "--vm 24 --section stepper_z\n"
-            "  tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AC --vm 48 "
-            "--write manta-m8p/xy-tmc5160-LDO-42STH48-2804AC.cfg "
+            "  tmc_calc.py --driver tmc5160 --motor LDO-42STH48-2804AH-R --vm 48 "
+            "--write manta-m8p/xy-tmc5160-LDO-42STH48-2804AH-R.cfg "
             "--wire-profile printers/v24-350\n"
         ),
     )

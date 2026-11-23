@@ -30,7 +30,7 @@ board=@BOARD@
 xy_step=@XY_STEP@
 
 # xy_motor — ключ мотора X/Y из docs/tmc/motors.json
-# (17HM19-1684 для 0.9°, LDO-42STH48-2804AC для 1.8°).
+# (17HM19-1684 для 0.9°, LDO-42STH48-2804AH-R для 1.8°).
 xy_motor=@XY_MOTOR@
 
 # xy_driver — микросхема драйвера X/Y: tmc5160 | tmc2209.
