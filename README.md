@@ -1137,8 +1137,10 @@ python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
 ### Известные патчи Klipper и настройка CAN-хоста
 
 Конфиги репозитория этих правок не содержат — они применяются на самом хосте
-принтера. Стенд v24-350 работает на Klipper `v0.13.0-816` и нуждается в обоих
-пунктах.
+принтера. Стенд v24-350 работает на Klipper `v0.13.0-828` (проверено
+2026-11-23): фикс trsync `29d4ec2` уже в его истории, а `can0` поднят с
+`qlen 1024`. Оба пункта ниже остаются обязательными для машин на более старых
+сборках.
 
 1. **trsync (upstream `29d4ec2`, 2026-11-11).** Без фикса при парковке и
    зондировании возможен `MCU 'mcu' shutdown: Timer too close`: знаковое
@@ -2424,7 +2426,10 @@ silently written to the wrong axes (this happened on v24-350 with the old
 ### Known Klipper patches and CAN host setup
 
 These changes are not part of the config repository; they are applied on the
-printer host itself. The v24-350 bench runs Klipper `v0.13.0-816` and needs both.
+printer host itself. The v24-350 bench runs Klipper `v0.13.0-828` (verified on
+2026-11-23): the trsync fix `29d4ec2` is already in its history and `can0` is
+up with `qlen 1024`. Both items below stay mandatory for machines on older
+builds.
 
 1. **trsync (upstream `29d4ec2`, 2026-11-11).** Without the fix, homing and
    probing can end in `MCU 'mcu' shutdown: Timer too close`: the signed
