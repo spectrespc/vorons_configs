@@ -809,6 +809,15 @@ python3 scripts/tmc_calc.py --update-module \
   накопительные `tx_retries`). Поэтому `[printer] 750/8500` не поднимаются:
   правило запаса 15 % берётся от монотонно пройденной клетки, а её выше
   1125/8500 нет.
+- X/Y с **128 микрошагами** проверены той же серией +50 % (2026-11-23,
+  baseline A, без VHIGH): 1000/12750, 1125/8500 и 1125/12750 — 3/3,
+  1125/10000 — 1/3 (`dy` ≈ -507 счётчиков). `diag4` на 1125/10000 даёт
+  `patterns 0/0` и сдвиг rehome до 1535 счётчиков (2.4 мм): предел — привязка
+  гоминга, а не разрешение шага. 128 — это 640 шагов/мм, 1125 мм/с = 720 кГц
+  на мотор; Manta M8P их принял без `Timer too close`. Применённый дефолт
+  остаётся **64**: 1125/10000 не проходит, а у 64 уже есть длинная тепловая и
+  качественная история. У драйвера Y в LDO-модулях `diag1_pin: DIAG_1` теперь
+  включён по умолчанию (как `DIAG_0` у X); на `CHOPCONF` это не влияет.
 - X/Y и Z пересчитаны от пикового тока даташита в RMS (`--current-basis peak`,
   `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO 2.8 A peak → 1.9799 A RMS,
   17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S 1.7 A peak → 1.2021 A RMS,
@@ -2028,6 +2037,17 @@ Script rules:
   with no `rx_error`/`tx_error` (only the cumulative `tx_retries` grew). The
   `[printer] 750/8500` limits therefore stay: the 15 % margin rule is taken
   from a monotonically passed cell, and there is none above 1125/8500.
+- X/Y with **128 microsteps** were run through the same +50 % series
+  (2026-11-23, baseline A, no VHIGH): 1000/12750, 1125/8500 and 1125/12750
+  passed 3/3, 1125/10000 passed 1/3 (`dy` ≈ -507 counts). `diag4` on
+  1125/10000 gives `patterns 0/0` and a re-home shift of up to 1535 counts
+  (2.4 mm): the limit is the homing reference, not the step resolution. 128
+  microsteps is 640 steps/mm, so 1125 mm/s is 720 kHz per motor; the Manta
+  M8P accepted it with no `Timer too close`. The applied default stays
+  **64**: 1125/10000 does not pass, and 64 already has a long thermal and
+  print-quality history. The Y driver now enables `diag1_pin: DIAG_1` by
+  default in the LDO modules (matching `DIAG_0` on X); `CHOPCONF` is
+  unaffected.
 - X/Y and Z are recalculated from the datasheet peak into RMS
   (`--current-basis peak`, `I_RMS = I_peak / √2 ≈ 0.707 · I_peak`): LDO
   2.8 A peak → 1.9799 A RMS, 17HM19 1.68 A peak → 1.1879 A RMS, Z 17HS4401S

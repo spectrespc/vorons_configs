@@ -198,6 +198,31 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** X/Y с 128 микрошагами проверены той же серией +50 % (2026-11-23,
+  baseline A, без VHIGH). Клетки 1000/12750, 1125/8500 и 1125/12750 — 3/3,
+  1125/10000 — 1/3 (`dy` ≈ -507 счётчиков). `diag4` на 1125/10000 даёт
+  `patterns 0/0` и сдвиг rehome до 1535 счётчиков (2.4 мм), то есть предел —
+  привязка гоминга, а не разрешение шага. 128 микрошагов — это 640 шагов/мм
+  (1125 мм/с = 720 кГц на мотор), Manta M8P выдержал без `Timer too close`.
+  Применённый дефолт остаётся 64: 1125/10000 не проходит, а у 64 уже есть
+  длинная тепловая и качественная история. **EN:** X/Y at 128 microsteps went
+  through the same +50 % series (2026-11-23, baseline A, no VHIGH). The
+  1000/12750, 1125/8500 and 1125/12750 cells passed 3/3, 1125/10000 passed
+  1/3 (`dy` ≈ -507 counts). `diag4` on 1125/10000 gives `patterns 0/0` and a
+  re-home shift of up to 1535 counts (2.4 mm), so the limit is the homing
+  reference, not the step resolution. 128 microsteps is 640 steps/mm
+  (1125 mm/s = 720 kHz per motor); the Manta M8P handled it with no
+  `Timer too close`. The applied default stays 64: 1125/10000 does not pass,
+  and 64 already has a long thermal and print-quality history.
+
+- **RU:** В LDO-модулях X/Y (`manta-m5p`, `manta-m8p`) у драйвера Y включён
+  `diag1_pin: DIAG_1` по умолчанию — так же, как `DIAG_0` у X. Опция только
+  выводит DIAG1 драйвера; `CHOPCONF` и остальные регистры не меняются.
+  **EN:** The LDO X/Y modules (`manta-m5p`, `manta-m8p`) now enable
+  `diag1_pin: DIAG_1` on the Y driver by default, matching `DIAG_0` on X.
+  The option only routes the driver's DIAG1 output; `CHOPCONF` and the other
+  registers are unchanged.
+
 - **RU:** Ревью `klipper_tmc_autotune` и замер огибающей +50 % на v24-350
   (2026-11-23). Модуль в парк **не берём**: он переписывает посчитанные
   `tmc_calc.py` регистры поверх конфига на `klippy:ready`, включает
