@@ -1115,6 +1115,7 @@ Klipper. Грязный клон (`git status` не пуст) Moonraker обно
 ```bash
 API="python3 ~/vorons_configs/scripts/lib/bringup_api.py"
 $API gcode G28
+$API --timeout 580 gcode QUAD_GANTRY_LEVEL        # портал должен быть ровным
 $API --timeout 120 gcode MEASURE_AXES_NOISE      # ориентир lis2dw: < 10
 $API --timeout 880 gcode 'TEST_RESONANCES AXIS=X'   # ~6 мин
 $API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
@@ -1122,6 +1123,12 @@ $API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
 scp spectre@<host>:/tmp/resonances_x_*.csv .
 python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
 ```
+
+Порядок важен: `G28` в этом профиле сам прогоняет QGL, но повторный явный
+`QUAD_GANTRY_LEVEL` перед замером обязателен. На стенде v24-350 перекос
+портала почти на 2 мм размазывал пик Y (FWHM 7.8 → 9.4 Гц, вертикальное плечо
+уходило на 60–65 Гц), а частота гуляла 33.5–37.3 Гц; после QGL до
+0.0085 мм пик стал одиночным и острым.
 
 Одну ось нельзя запускать, пока идёт предыдущий тест: команда синхронная,
 между ними достаточно `wait-idle --timeout 900`. Пик ищется в `psd_x` для X и
@@ -2402,6 +2409,7 @@ Prerequisites:
 ```bash
 API="python3 ~/vorons_configs/scripts/lib/bringup_api.py"
 $API gcode G28
+$API --timeout 580 gcode QUAD_GANTRY_LEVEL        # the gantry must be level
 $API --timeout 120 gcode MEASURE_AXES_NOISE      # lis2dw target: < 10
 $API --timeout 880 gcode 'TEST_RESONANCES AXIS=X'   # ~6 min
 $API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
@@ -2409,6 +2417,12 @@ $API --timeout 880 gcode 'TEST_RESONANCES AXIS=Y'
 scp spectre@<host>:/tmp/resonances_x_*.csv .
 python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
 ```
+
+The order matters: `G28` already runs QGL in this profile, but an explicit
+`QUAD_GANTRY_LEVEL` right before the measurement is mandatory. On the v24-350
+bench a gantry skew of almost 2 mm smeared the Y peak (FWHM 7.8 → 9.4 Hz, the
+vertical shoulder moved to 60–65 Hz) and the frequency wandered over
+33.5–37.3 Hz; after QGL down to 0.0085 mm the peak became single and sharp.
 
 Never start the second axis while the first test is running: the command is
 synchronous, so `wait-idle --timeout 900` between them is enough. Look for the

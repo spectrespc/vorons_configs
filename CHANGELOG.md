@@ -201,21 +201,32 @@ Every entry is provided in Russian and English.
 - **RU:** `[input_shaper]` стенда v24-350 перекалиброван по методике Klipper
   Measuring Resonances (2026-11-23, lis2dw на sht36-v3, `axes_map: -y,z,-x`):
   X 71.0 Гц `ei` → 51.2 Гц `mzv` (пик 50 Гц в `psd_x`, остаточные вибрации
-  0.4 %, сглаживание 0.078), Y 64.0 Гц `2hump_ei` → 35.2 Гц `mzv` (пик 34 Гц
-  в `psd_y`, 0.0 %, 0.164). Старые значения были сняты до перевода X/Y на
+  0.4 %, сглаживание 0.078), Y 64.0 Гц `2hump_ei` → 38.2 Гц `mzv` (пик 37.3 Гц
+  в `psd_y`, 0.0 %, 0.140). Старые значения были сняты до перевода X/Y на
   TMC5160 и не соответствуют текущей механике; `max_accel: 8500` оставлен
-  без изменений (при mzv 35.2 Гц Klipper советует не выше 3700 — это осознанный
+  без изменений (при mzv 38.2 Гц Klipper советует не выше 4300 — это осознанный
   компромисс по скорости). Значения лежат в
   `printers/v24-350/local/input.shaper.cfg`, `SAVE_CONFIG` не используется.
+  Пять прогонов `TEST_RESONANCES AXIS=Y` дали 33.5–37.3 Гц: пик уезжает вниз и
+  размазывается (FWHM 7.8 → 9.4 Гц, вертикальное плечо уходит на 60–65 Гц),
+  если замерять на перекошенном портале. После `QUAD_GANTRY_LEVEL` (rough
+  1.876 → 0.045 мм, fine 0.0085 мм) пик стал одиночным и острым
+  (37.3 Гц, Q ≈ 4.8), поэтому принято значение этой серии, а не среднее 35.7 Гц.
   **EN:** The v24-350 bench `[input_shaper]` was recalibrated with Klipper's
   Measuring Resonances procedure (2026-11-23, lis2dw on sht36-v3,
   `axes_map: -y,z,-x`): X 71.0 Hz `ei` → 51.2 Hz `mzv` (50 Hz peak in
   `psd_x`, 0.4 % residual vibrations, 0.078 smoothing), Y 64.0 Hz `2hump_ei`
-  → 35.2 Hz `mzv` (34 Hz peak in `psd_y`, 0.0 %, 0.164). The old values were
+  → 38.2 Hz `mzv` (37.3 Hz peak in `psd_y`, 0.0 %, 0.140). The old values were
   taken before X/Y moved to TMC5160 and no longer match the mechanics;
-  `max_accel: 8500` is intentionally unchanged (at mzv 35.2 Hz Klipper
-  suggests no more than 3700). The values live in
+  `max_accel: 8500` is intentionally unchanged (at mzv 38.2 Hz Klipper
+  suggests no more than 4300). The values live in
   `printers/v24-350/local/input.shaper.cfg`, `SAVE_CONFIG` is not used.
+  Five `TEST_RESONANCES AXIS=Y` runs produced 33.5–37.3 Hz: the peak drifts down
+  and smears (FWHM 7.8 → 9.4 Hz, the vertical shoulder moves to 60–65 Hz) when
+  the gantry is skewed during the measurement. After `QUAD_GANTRY_LEVEL`
+  (rough 1.876 → 0.045 mm, fine 0.0085 mm) the peak became single and sharp
+  (37.3 Hz, Q ≈ 4.8), so the value from that series was chosen over the
+  35.7 Hz mean.
 
 - **RU:** Лестница +15 % (750/8500 → 1500/15000) на v24-350 (2026-11-23,
   baseline A, без VHIGH, 3 повтора на клетку, критерий 0.1 мм: 32 счётчика
