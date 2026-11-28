@@ -198,6 +198,21 @@ Every entry is provided in Russian and English.
 
 ### Changed / Изменено
 
+- **RU:** PID экструдера стенда v24-350 перекалиброван на рабочую температуру
+  270 °C: `pid_Kp/pid_Ki/pid_Kd` 32.208/2.497/103.871 → 15.996/10.664/5.998
+  (`PID_CALIBRATE HEATER=extruder TARGET=270`, 2026-11-28). Прежние
+  коэффициенты были сняты на 250 °C и на 240 °C давали перелёт ~13 °C; с новыми
+  нагрев до 270 °C идёт с перелётом 0.47 °C, удержание 60 с — 269.53…270.47 °C
+  (среднее 269.97, допуск ±1.5). Значения в `printers/v24-350/local/pid.cfg`,
+  `SAVE_CONFIG` не используется.
+  **EN:** The v24-350 bench extruder PID was recalibrated at the 270 °C working
+  temperature: `pid_Kp/pid_Ki/pid_Kd` 32.208/2.497/103.871 → 15.996/10.664/5.998
+  (`PID_CALIBRATE HEATER=extruder TARGET=270`, 2026-11-28). The previous gains
+  were taken at 250 °C and overshot by ~13 °C at 240 °C; with the new ones the
+  heat-up to 270 °C overshoots by 0.47 °C and a 60 s hold stays within
+  269.53…270.47 °C (mean 269.97, ±1.5 tolerance). The values live in
+  `printers/v24-350/local/pid.cfg`, `SAVE_CONFIG` is not used.
+
 - **RU:** `[input_shaper]` стенда v24-350 перекалиброван по методике Klipper
   Measuring Resonances (2026-11-23, lis2dw на sht36-v3, `axes_map: -y,z,-x`):
   X 71.0 Гц `ei` → 51.2 Гц `mzv` (пик 50 Гц в `psd_x`, остаточные вибрации
