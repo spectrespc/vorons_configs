@@ -1135,6 +1135,15 @@ python3 calibrate_shaper.py -o shaper_x.png resonances_x_*.csv
 в `psd_y` для Y; `calibrate_shaper.py` подбирает `shaper_freq_*` и
 `shaper_type_*` с оценкой остаточных вибраций и сглаживания.
 
+`MEASURE_AXES_NOISE` усредняет PSD по всей полосе (0…~800 Гц), поэтому на
+стенде v24-350 число раздувается стоп-тоном драйверов X/Y: при поданном токе
+моторы поют на ~237 Гц (≈0.04 g RMS), метрика уходит в 30–200 при пороге < 10,
+хотя в полосе калибровки 5–133 Гц шум остаётся 1.5–1.7. Проверяется
+отключением `SET_STEPPER_ENABLE STEPPER=stepper_x ENABLE=0` (и `stepper_y`):
+тон исчезает, метрика возвращается к 1.3–2.1. На `TEST_RESONANCES` это не
+влияет — 237 Гц лежит выше диапазона выгрузки CSV (`max_freq × 1.5` ≈ 199 Гц)
+и в подгонку шейпера не попадает.
+
 Ориентация датчика проверяется до первого замера: на неподвижном принтере
 `ACCELEROMETER_QUERY` должен показывать весь вектор тяжести в Z
 (`z≈+9475 mm/s²` для lis2dw при `axes_map: -y,z,-x`), ход +X — отклик только
@@ -2429,6 +2438,15 @@ synchronous, so `wait-idle --timeout 900` between them is enough. Look for the
 peak in `psd_x` for X and in `psd_y` for Y; `calibrate_shaper.py` picks
 `shaper_freq_*` and `shaper_type_*` with residual vibration and smoothing
 estimates.
+
+`MEASURE_AXES_NOISE` averages the PSD over the whole band (0…~800 Hz), so on
+the v24-350 bench the number is inflated by the X/Y driver standstill tone: with
+current applied the motors sing at ~237 Hz (≈0.04 g RMS), the metric jumps to
+30–200 against the < 10 threshold, while the 5–133 Hz calibration band stays at
+1.5–1.7. Verify with `SET_STEPPER_ENABLE STEPPER=stepper_x ENABLE=0` (and
+`stepper_y`): the tone disappears and the metric returns to 1.3–2.1. This does
+not affect `TEST_RESONANCES` — 237 Hz is above the CSV export range
+(`max_freq × 1.5` ≈ 199 Hz) and never enters the shaper fit.
 
 Check the sensor orientation before the first measurement: with the printer
 stationary `ACCELEROMETER_QUERY` must report the whole gravity vector in Z
